@@ -1,0 +1,7 @@
+ignore_scripts/
+
+# media files
+*.mp4
+*.gif
+*.png
+*.jpg
