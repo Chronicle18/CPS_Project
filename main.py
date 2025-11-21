@@ -3,6 +3,8 @@ import pybullet_data
 import time
 import math
 import numpy as np
+import sys
+import os
 
 
 # ============================================================
@@ -10,8 +12,8 @@ import numpy as np
 # ============================================================
 TIME_STEP = 1.0 / 240.0
 CUBE_MASS_RATIO = 0.25          # cube = 25% of car mass
-CUBE_Y_LIMIT = 0.5              # meters forward/back allowed
-CUBE_X_LIMIT = 0.3              # meters left/right allowed
+CUBE_Y_LIMIT_RATIO = 0.80     
+CUBE_X_LIMIT_RATIO = 0.70       
 
 # PID Tuning for Pitch (Y-axis movement)
 PID_PITCH_KP = 8.0
@@ -25,8 +27,36 @@ PID_ROLL_KD = 0.8
 
 TARGET_PITCH = 0.0              # keep car level during flight
 TARGET_ROLL = 0.0               # keep car level during flight
-FORWARD_FORCE = 40.0            # driving force toward ramp
 RAMP_ANGLE = 25 * math.pi / 180 # degrees → radians
+
+# ============================================================
+#  SPEED PROFILES
+# ============================================================
+SPEED_PROFILES = {
+    'SLOW': {
+        'target_velocity': 40,
+        'max_force': 100,
+        'description': 'Slow and steady'
+    },
+    'NORMAL': {
+        'target_velocity': 80,
+        'max_force': 180,
+        'description': 'Standard speed'
+    },
+    'FAST': {
+        'target_velocity': 100,
+        'max_force': 180,
+        'description': 'High speed'
+    },
+    'VERY_FAST': {
+        'target_velocity': 160,
+        'max_force': 180,
+        'description': 'Maximum speed'
+    }
+}
+
+# Select speed mode here
+SELECTED_SPEED = 'FAST'  # Change to: SLOW, NORMAL, FAST, or VERY_FAST
 
 # Success/Failure Criteria
 MAX_ROLL_ANGLE = 45 * math.pi / 180     # 45 degrees
@@ -217,7 +247,7 @@ def init_sim():
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     
     # Add debug text
-    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
+    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
     
     return cid
 
@@ -262,33 +292,60 @@ def load_world():
 def load_car_with_mass():
     car = p.loadURDF("racecar/racecar.urdf", [0, 0, 0.2], globalScaling=2.0)
 
+    for _ in range(10):
+        p.stepSimulation()
+
     # Get car mass
     dyn = p.getDynamicsInfo(car, -1)
     car_mass = dyn[0]
     cube_mass = car_mass * CUBE_MASS_RATIO
 
-    # ----- internal cube -----
-    cube_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.1])
-    cube_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.1, 0.1, 0.1],
-                                   rgbaColor=[0, 1, 0, 1])
+    # Get car bounding box to determine size
+    car_aabb = p.getAABB(car, -1)
+    car_min, car_max = car_aabb
+    car_length = car_max[0] - car_min[0]  # X dimension (front-back)
+    car_width = car_max[1] - car_min[1]   # Y dimension (left-right)
+    car_height = car_max[2] - car_min[2]  # Z dimension (up-down)
+
+    cube_half_extent = 0.05
+        # ----- internal cube (small but heavy) -----
+    cube_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[cube_half_extent]*3)
+    cube_vis = p.createVisualShape(
+        p.GEOM_BOX, 
+        halfExtents=[cube_half_extent]*3,
+        rgbaColor=[0, 1, 0, 1]
+    )
 
     cube = p.createMultiBody(
         baseMass=cube_mass,
         baseCollisionShapeIndex=cube_col,
         baseVisualShapeIndex=cube_vis,
-        basePosition=[0, 0, 0.4]
+        basePosition=[0, 0, 0.2]  # Start centered above scaled car
     )
 
     print(f"Car mass: {car_mass:.2f}kg")
     print(f"Cube mass: {cube_mass:.2f}kg ({CUBE_MASS_RATIO*100:.0f}% of car)")
+    print(f"Car dimensions (L×W×H): {car_length:.2f}m × {car_width:.2f}m × {car_height:.2f}m")
+    print(f"Cube size: {cube_half_extent*2:.3f}m (5% of avg car dimension)")
 
-    return car, cube, cube_mass
+    return car, cube, cube_mass, car_length, car_width, car_height
 
 
 # ============================================================
 #  MAIN SIM LOGIC
 # ============================================================
 def run_sim():
+    # Get speed profile
+    speed_config = SPEED_PROFILES[SELECTED_SPEED]
+    FAST_TARGET_VEL = speed_config['target_velocity']
+    MAX_WHEEL_FORCE = speed_config['max_force']
+    
+    print(f"\n{'='*60}")
+    print(f"SPEED MODE: {SELECTED_SPEED}")
+    print(f"Description: {speed_config['description']}")
+    print(f"Target Velocity: {FAST_TARGET_VEL} | Max Force: {MAX_WHEEL_FORCE}")
+    print(f"{'='*60}\n")
+    
     # Initialize controllers
     pid_pitch = PID(PID_PITCH_KP, PID_PITCH_KI, PID_PITCH_KD)
     pid_roll = PID(PID_ROLL_KP, PID_ROLL_KI, PID_ROLL_KD)
@@ -296,35 +353,42 @@ def run_sim():
 
     init_sim()
     load_world()
-    car, cube, cube_mass = load_car_with_mass()
+    car, cube, cube_mass, car_length, car_width, car_height = load_car_with_mass()
+    
+    # Calculate cube movement limits based on car dimensions
+    CUBE_Y_LIMIT = car_length * CUBE_Y_LIMIT_RATIO  # Along car length (forward/back)
+    CUBE_X_LIMIT = car_width * CUBE_X_LIMIT_RATIO   # Along car width (left/right)
+    
+    print(f"Cube Y-axis limit: ±{CUBE_Y_LIMIT:.3f}m ({CUBE_Y_LIMIT_RATIO*100:.0f}% of car length)")
+    print(f"Cube X-axis limit: ±{CUBE_X_LIMIT:.3f}m ({CUBE_X_LIMIT_RATIO*100:.0f}% of car width)")
+    print(f"{'='*60}\n")
 
     # Wheels = joints 2 and 3 for rear drive
     wheel_joints = [2, 3]
-
-    # Make wheels more powerful
-    FAST_TARGET_VEL = 100
-    MAX_WHEEL_FORCE = 2400
 
     # Reduce damping so wheels spin freely
     for j in wheel_joints:
         p.changeDynamics(car, j, lateralFriction=1.2, 
                         spinningFriction=0.02, rollingFriction=0.0)
 
-    # Initial cube position (local coords)
+    # Initial cube position (local coords) - centered
     cube_local_x = 0.0
     cube_local_y = 0.0
-    cube_local_z = 0.2
+    cube_local_z = 0.2  # Adjusted for 2x scaled car
 
     # ---------------------------------------------------------
     # START MP4 RECORDING
     # ---------------------------------------------------------
+
+    original_stderr = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
     log_id = p.startStateLogging(
         p.STATE_LOGGING_VIDEO_MP4,
         "car_flip_controller_enhanced.mp4"
     )
 
     # Simulation loop
-    MAX_STEPS = 1500
+    MAX_STEPS = 1000
     start_time = time.time()
     
     for step in range(MAX_STEPS):
@@ -362,26 +426,21 @@ def run_sim():
             time_to_collision = 0
 
         # ----------------------------------------------------------
-        # MID-AIR CONTROL (2D: pitch and roll)
+        # CONTINUOUS BALANCE CONTROL (2D: pitch and roll)
+        # Active at all times - driving, airborne, and landing
         # ----------------------------------------------------------
-        if monitor.status == "AIRBORNE":
-            # Pitch control (Y-axis cube movement)
-            pitch_error = TARGET_PITCH - pitch
-            cube_shift_y = pid_pitch.step(pitch_error)
-            cube_shift_y = max(-CUBE_Y_LIMIT, min(CUBE_Y_LIMIT, cube_shift_y))
-            
-            # Roll control (X-axis cube movement)
-            roll_error = TARGET_ROLL - roll
-            cube_shift_x = pid_roll.step(roll_error)
-            cube_shift_x = max(-CUBE_X_LIMIT, min(CUBE_X_LIMIT, cube_shift_x))
-            
-            cube_local_x = cube_shift_x
-            cube_local_y = cube_shift_y
-            
-        else:
-            # Keep cube centered when not airborne
-            cube_local_x = 0.0
-            cube_local_y = 0.0
+        # Pitch control (Y-axis cube movement)
+        pitch_error = TARGET_PITCH - pitch
+        cube_shift_y = pid_pitch.step(pitch_error)
+        cube_shift_y = max(-CUBE_Y_LIMIT, min(CUBE_Y_LIMIT, cube_shift_y))
+        
+        # Roll control (X-axis cube movement)
+        roll_error = TARGET_ROLL - roll
+        cube_shift_x = pid_roll.step(roll_error)
+        cube_shift_x = max(-CUBE_X_LIMIT, min(CUBE_X_LIMIT, cube_shift_x))
+        
+        cube_local_x = cube_shift_x
+        cube_local_y = cube_shift_y
 
         # ----------------------------------------------------------
         # UPDATE CUBE POSITION
@@ -396,10 +455,10 @@ def run_sim():
         monitor.update(car, current_time)
         
         # Display status in console
-        if step % 60 == 0:  # Every 0.25 seconds
-            print(f"t={current_time:.2f}s | Status: {monitor.status:10s} | "
-                  f"Height: {height:.2f}m | Pitch: {math.degrees(pitch):6.1f}° | "
-                  f"Roll: {math.degrees(roll):6.1f}° | Cube: ({cube_local_x:.2f}, {cube_local_y:.2f})")
+        # if step % 60 == 0:  # Every 0.25 seconds
+        #     print(f"t={current_time:.2f}s | Status: {monitor.status:10s} | "
+        #           f"Height: {height:.2f}m | Pitch: {math.degrees(pitch):6.1f}° | "
+        #           f"Roll: {math.degrees(roll):6.1f}° | Cube: ({cube_local_x:.2f}, {cube_local_y:.2f})")
 
         # ----------------------------------------------------------
         # FOLLOW CAMERA
@@ -429,7 +488,8 @@ def run_sim():
     # FINAL REPORT
     # ---------------------------------------------------------
     print(monitor.get_report())
-    print(f"MP4 Saved as: car_flip_controller_enhanced.mp4")
+    print(f"Speed Mode: {SELECTED_SPEED}")
+    print(f"MP4 Saved as: car_flip_controller_enhanced.mp4\n")
 
 
 # ============================================================
