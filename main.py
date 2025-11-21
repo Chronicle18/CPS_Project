@@ -42,7 +42,7 @@ def check_task_state(car, plane, ramp, time_step):
     if task_states["ascend"] and task_states["launched"] and len(p.getContactPoints(car, plane)) > 0 and not task_states["landed"]:
         print("Landed at step:", time_step)
         task_states["landed"] = True
-        time_step = MAX_STEPS - 100     # end simulation on landing
+        time_step = MAX_STEPS - 200     # end simulation on landing
     
     return time_step
 
