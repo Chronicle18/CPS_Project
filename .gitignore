@@ -1,7 +1,12 @@
 ignore_scripts/
+__pycache__/
+*.pyc
+*.DS_Store
 
 # media files
 *.mp4
 *.gif
 *.png
 *.jpg
+
+results/
