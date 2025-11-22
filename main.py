@@ -48,11 +48,10 @@ def run_sim(cfg):
 
     # initialize environment
     env = CarJumpEnv(cfg)
-    plane,ramp = env.plane, env.ramp
+    plane, ramp = env.plane, env.ramp
     car, cube = env.car, env.cube
     main_cam = env.main_cam
     pov_cam = env.pov_cam
-
 
     # Move cube initially at center
     current_local_cube_pos = cfg['cube']['local_initial_pos']
@@ -65,48 +64,88 @@ def run_sim(cfg):
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
     vid_writer = VideoWriter(video_path, frame_size=(cfg['camera']['width'], cfg['camera']['height']), fps=cfg['logging']['video_fps'])
 
+    # Get speed profile settings
+    selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
+    speed_config = cfg['speed_profiles'][selected_profile]
+    target_velocity = speed_config['target_velocity']
+    forward_force = speed_config['forward_force']
+    
+    print(f"\n{'='*60}")
+    print(f"SPEED MODE: {selected_profile}")
+    print(f"Description: {speed_config['description']}")
+    print(f"Target Velocity: {target_velocity}")
+    print(f"Forward Force: {forward_force}")
+    print(f"{'='*60}\n")
+
+    # Airtime tracking
+    airborne_start_time = None
+    total_airtime = 0.0
+    is_airborne = False
+    
+    wheel_joints = cfg['car']['wheel_joints']
+
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
         while time_step < MAX_STEPS:
             time_step += 1
             pbar.update(1)
+            
+            current_time = time_step * cfg['simulation']['time_step']
 
             # ----------------------------------------------------------
             # DRIVE FORWARD
             # ----------------------------------------------------------
-            for j in cfg['car']['wheel_joints']:
-                if j in [2,3]:  # rear wheels
+            for j in wheel_joints:
+                if j in [2, 3]:  # rear wheels
                     p.setJointMotorControl2(
                         bodyUniqueId=car,
                         jointIndex=j,
                         controlMode=p.VELOCITY_CONTROL,
-                        targetVelocity=cfg['car']['target_velocity'],
-                        force=cfg['car']['forward_force']
+                        targetVelocity=target_velocity,
+                        force=forward_force
                     )
-                # else:           # front wheels
-                #     p.setJointMotorControl2(
-                #         bodyUniqueId=car,
-                #         jointIndex=j,
-                #         controlMode=p.VELOCITY_CONTROL,
-                #         targetVelocity=100,
-                #         force=FORWARD_FORCE * 0.2
-                #     )
 
             # ----------------------------------------------------------
             # CAR STATE
             # ----------------------------------------------------------
             car_pos, car_orn = p.getBasePositionAndOrientation(car)
+            car_vel, car_ang_vel = p.getBaseVelocity(car)
             _, pitch, _ = p.getEulerFromQuaternion(car_orn)
 
-            # vertical distance from ground
-            # height = car_pos[2]
+            # Calculate current speed
+            current_speed = np.linalg.norm(car_vel)
+            
+            # ----------------------------------------------------------
+            # CHECK AIRBORNE STATUS
+            # ----------------------------------------------------------
+            wheel_contacts = []
+            for wheel_joint in [2, 3]:  # rear wheels
+                contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
+                wheel_contacts.extend(contacts)
+            
+            was_airborne = is_airborne
+            is_airborne = len(wheel_contacts) == 0
+            
+            # Track airtime
+            if is_airborne and not was_airborne:
+                airborne_start_time = current_time
+                print(f"[{current_time:.2f}s] Airborne!")
+            elif not is_airborne and was_airborne:
+                if airborne_start_time is not None:
+                    flight_duration = current_time - airborne_start_time
+                    total_airtime += flight_duration
+                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
+                    airborne_start_time = None
+            
+            # Calculate current airtime
+            if is_airborne and airborne_start_time is not None:
+                current_airtime = current_time - airborne_start_time
+            else:
+                current_airtime = 0.0
 
-            # time before landing (simple estimate)
-            # if height > 0.3:
-            #     time_to_collision = math.sqrt(2 * (height - 0.2) / 9.8)
-            # else:
-            #     time_to_collision = 0
-
+            # ----------------------------------------------------------
+            # CHECK LANDING
+            # ----------------------------------------------------------
             if monitor.hasLanded(car, plane, ramp, TASK_STATES):
                 print("Landed at step:", time_step)
                 time_step = MAX_STEPS - 200
@@ -115,14 +154,13 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # MID-AIR CONTROL
             # ----------------------------------------------------------
-            # if height > 0.3:
             pitch_error = cfg['pid']['target_pitch'] - pitch
             cube_shift = pid.step(pitch_error)
 
             # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x']) #max(-CUBE_X_LIMIT, min(CUBE_X_LIMIT, cube_shift))
+            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
 
-            current_local_cube_pos = [cube_shift, 0,  0.2]
+            current_local_cube_pos = [cube_shift, 0, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
@@ -144,11 +182,21 @@ def run_sim(cfg):
             # Step simulation
             p.stepSimulation()
             rgb = main_cam.get_image()
-            vid_writer.write_frame(rgb, postprocess=True)
-            # time.sleep(cfg['simulation']['time_step'])
+            
+            # Prepare overlay data
+            overlay_data = {
+                'current_speed': current_speed,
+                'target_speed': target_velocity,
+                'airtime': current_airtime if is_airborne else total_airtime,
+                'is_airborne': is_airborne
+            }
+            
+            vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data)
     
     p.disconnect()
-    vid_writer.save_and_release()
+    vid_writer.release()
+    
+    print(f"\nTotal airtime: {total_airtime:.2f}s")
     print("Video saved.")
     print("Simulation complete.")
 

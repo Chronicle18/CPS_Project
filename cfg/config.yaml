@@ -1,9 +1,9 @@
 simulation:
-  mode: "HEADLESS"           # HEADLESS or GUI
-  time_step: 0.004166        # 1/240
+  mode: "GUI" # HEADLESS or GUI
+  time_step: 0.004166 # 1/240
   gravity: [0, 0, -9.8]
   max_steps: 800
-  sleep: true                # whether to use time.sleep
+  sleep: true # whether to use time.sleep
 
 camera:
   width: 640
@@ -30,20 +30,37 @@ car:
   urdf: "racecar/racecar.urdf"
   scale: 2.0
   position: [0, 0, 0.1]
-  forward_force: 200.0
-  target_velocity: 100
+  speed_profile: "NORMAL" # Options: SLOW, NORMAL, FAST, VERY_FAST
   wheel_joints: [2, 3, 5, 4]
   lateral_friction: 1.2
   spinning_friction: 0.02
   rolling_friction: 0.0
 
+speed_profiles:
+  SLOW:
+    target_velocity: 60
+    forward_force: 120
+    description: "Slow and steady"
+  NORMAL:
+    target_velocity: 90
+    forward_force: 220
+    description: "Standard speed"
+  FAST:
+    target_velocity: 110
+    forward_force: 250
+    description: "High speed"
+  VERY_FAST:
+    target_velocity: 130
+    forward_force: 280
+    description: "Maximum speed"
+
 cube:
-  mass_ratio: 0.25           # cube_mass = car_mass * mass_ratio
-  size_factor: 0.0375                # x times car scale
+  mass_ratio: 0.25 # cube_mass = car_mass * mass_ratio
+  size_factor: 0.0375 # x times car scale
   position: [0.25, 0, 0.2]
   color: [0, 1, 0, 1]
   local_initial_pos: [0.25, 0, 0.2]
-  limit_x: 0.25        # for PID pitch control
+  limit_x: 0.25 # for PID pitch control
 
 pid:
   kp: 6.0
@@ -59,7 +76,7 @@ ramp:
   width: 2.0
   thickness: 0.1
   angle_deg: 25
-  angle_rad: 0.45            # if overriding radian angle
+  angle_rad: 0.45 # if overriding radian angle
   position: [8, 0, 0.2]
   color: [0.8, 0.2, 0.2, 1]
 
