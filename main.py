@@ -4,10 +4,9 @@ import datetime
 import argparse
 import numpy as np
 import os
-import math
 from tqdm import tqdm
 from utils.videowriter import VideoWriter
-from modules.controllers import PID
+from modules.controllers import CubeController
 from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
@@ -53,12 +52,30 @@ def run_sim(cfg):
     main_cam = env.main_cam
     pov_cam = env.pov_cam
 
-    # Move cube initially at center
-    current_local_cube_pos = cfg['cube']['local_initial_pos']
-    time_step = 0
+    # Calculate asymmetric limits
+    aabb_min, aabb_max = p.getAABB(car)
+    car_length = aabb_max[0] - aabb_min[0]
+    aabb_center_world = [
+        (aabb_min[0] + aabb_max[0]) / 2,
+        (aabb_min[1] + aabb_max[1]) / 2,
+        (aabb_min[2] + aabb_max[2]) / 2
+    ]
+    local_center = geom.world_to_local(car, aabb_center_world)
+    local_front_x = geom.world_to_local(car, [aabb_max[0], 0, 0])[0]
+    local_back_x = geom.world_to_local(car, [aabb_min[0], 0, 0])[0]
+    cube_size = cfg['cube']['size_factor'] * cfg['car']['scale']
+    limit_front = local_front_x - local_center[0] - (cube_size / 2.0)
+    limit_back = local_center[0] - local_back_x - (cube_size / 2.0)
+    limit_front = min(cfg['cube']['limit_x'] * 2, limit_front)
+    limit_back = min(cfg['cube']['limit_x'], limit_back) # Use config limit for back as well
 
     # initialize controller
-    pid = PID(cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'])
+    controller = CubeController(cfg['pid'], limit_front, limit_back, local_center[0])
+    
+    # Initial cube position
+    current_local_cube_pos = [controller.local_center_x, 0, 0.2]
+    time_step = 0
+
 
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
@@ -96,13 +113,21 @@ def run_sim(cfg):
             # DRIVE FORWARD
             # ----------------------------------------------------------
             for j in wheel_joints:
-                if j in [2, 3]:  # rear wheels
+                if j in [4, 5]:  # front wheels (FWD)
                     p.setJointMotorControl2(
                         bodyUniqueId=car,
                         jointIndex=j,
                         controlMode=p.VELOCITY_CONTROL,
                         targetVelocity=target_velocity,
                         force=forward_force
+                    )
+                else: # rear wheels (free spinning)
+                    p.setJointMotorControl2(
+                        bodyUniqueId=car,
+                        jointIndex=j,
+                        controlMode=p.VELOCITY_CONTROL,
+                        targetVelocity=0,
+                        force=0
                     )
 
             # ----------------------------------------------------------
@@ -154,13 +179,19 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # MID-AIR CONTROL
             # ----------------------------------------------------------
-            pitch_error = cfg['pid']['target_pitch'] - pitch
-            cube_shift = pid.step(pitch_error)
-
-            # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
-
-            current_local_cube_pos = [cube_shift, 0, 0.2]
+            
+            # ----------------------------------------------------------
+            # MID-AIR CONTROL
+            # ----------------------------------------------------------
+            
+            if is_airborne:
+                cube_shift, local_center_x = controller.get_control_action(pitch, time_step)
+            else:
+                # Center the cube when on ground/ramp
+                cube_shift = 0.0
+                local_center_x = controller.local_center_x
+                
+            current_local_cube_pos = [cube_shift + local_center_x, 0, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION

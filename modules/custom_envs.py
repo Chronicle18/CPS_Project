@@ -74,16 +74,25 @@ class CarJumpEnv:
         return plane, ramp
 
     def load_car_with_cube(self):
-        car_scale = self.cfg['car']['scale']
-        car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
-
+        car = self.load_car()
+        
         # Get car mass
         dyn = p.getDynamicsInfo(car, -1)
         car_mass = dyn[0]
         print("Car mass:", car_mass)
         
+        cube = self.create_cube(car_mass)
+        self.setup_car_dynamics(car)
 
-        # ----- internal cube -----
+        return car, cube
+
+    def load_car(self):
+        car_scale = self.cfg['car']['scale']
+        car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
+        return car
+
+    def create_cube(self, car_mass):
+        car_scale = self.cfg['car']['scale']
         cube_size = self.cfg['cube']['size_factor'] * car_scale
         cube_mass = car_mass * self.cfg['cube']['mass_ratio']
 
@@ -97,17 +106,14 @@ class CarJumpEnv:
             baseVisualShapeIndex=cube_vis,
             basePosition=self.cfg['cube']['position']
         )
+        return cube
 
-        # Wheels = joints 2 and 3 for rear drive
-        # wheel_joints = [2, 3 ,5, 4]
-
+    def setup_car_dynamics(self, car):
         for j in self.cfg['car']['wheel_joints']:
             p.changeDynamics(car, j, 
                             lateralFriction=self.cfg['car']['lateral_friction'], 
                             spinningFriction=self.cfg['car']['spinning_friction'], 
                             rollingFriction=self.cfg['car']['rolling_friction'])
-
-        return car, cube
 
 
 

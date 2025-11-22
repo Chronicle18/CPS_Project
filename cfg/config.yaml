@@ -55,17 +55,17 @@ speed_profiles:
     description: "Maximum speed"
 
 cube:
-  mass_ratio: 0.25 # cube_mass = car_mass * mass_ratio
-  size_factor: 0.0375 # x times car scale
-  position: [0.25, 0, 0.2]
+  mass_ratio: 0.25           # cube_mass = car_mass * mass_ratio
+  size_factor: 0.0375                # x times car scale
+  position: [0.4, 0, 0.2]
   color: [0, 1, 0, 1]
-  local_initial_pos: [0.25, 0, 0.2]
-  limit_x: 0.25 # for PID pitch control
+  local_initial_pos: [0.4, 0, 0.2]
+  limit_x: 0.25        # for PID pitch control
 
 pid:
-  kp: 6.0
-  ki: 0.0
-  kd: 0.6
+  kp: 25.0
+  ki: 0.1
+  kd: 2.0
   target_pitch: 0.0
 
 world:
