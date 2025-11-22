@@ -11,9 +11,20 @@ camera:
   fov: 90
   near: 0.1
   far: 100
-  distance: 4.0
+  distance: 2.0
   yaw: 20
   pitch: -20
+
+back_camera:
+  width: 640
+  height: 480
+  fov: 90
+  near: 0.1
+  far: 100
+  distance: 2.0
+  yaw: 270
+  pitch: -30
+  roll: 0
 
 car:
   urdf: "racecar/racecar.urdf"

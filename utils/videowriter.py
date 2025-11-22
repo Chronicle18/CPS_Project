@@ -11,15 +11,17 @@ class VideoWriter:
 
     
     def write_frame(self, frame, postprocess=False):
+        # TODO : Feature to take a list of frames and concatenate them before writing
         if frame is not None:
             frame = np.reshape(frame, (self.H, self.W, 4))[:, :, :3].astype(np.uint8)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             # TODO : Overlay text
         if postprocess:
             self.frames.append(frame)
         else:
             self.writer.write(frame)
 
-    def release(self):
+    def save_and_release(self):
         if self.frames:
             for f in self.frames:
                 self.writer.write(f)
