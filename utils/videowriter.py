@@ -20,7 +20,7 @@ class VideoWriter:
         """
         if frame is not None:
             frame = np.reshape(frame, (self.H, self.W, 4))[:, :, :3].astype(np.uint8)
-            
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             # Add text overlay if data provided
             if overlay_data is not None:
                 frame = self._add_overlay(frame, overlay_data)
@@ -37,7 +37,7 @@ class VideoWriter:
         # Font settings
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.5
-        font_thickness = 2
+        font_thickness = 1
         text_color = (255, 255, 255)  # White
         bg_color = (0, 0, 0)  # Black background
         padding = 5

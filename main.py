@@ -4,7 +4,6 @@ import datetime
 import argparse
 import numpy as np
 import os
-import math
 from tqdm import tqdm
 from utils.videowriter import VideoWriter
 from modules.controllers import PID
@@ -82,7 +81,7 @@ def run_sim(cfg):
     total_airtime = 0.0
     is_airborne = False
     
-    wheel_joints = cfg['car']['wheel_joints']
+    rear_wheel_joints = cfg['car']['rear_whls']
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
@@ -95,8 +94,7 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # DRIVE FORWARD
             # ----------------------------------------------------------
-            for j in wheel_joints:
-                if j in [2, 3]:  # rear wheels
+            for j in rear_wheel_joints:
                     p.setJointMotorControl2(
                         bodyUniqueId=car,
                         jointIndex=j,
@@ -119,7 +117,7 @@ def run_sim(cfg):
             # CHECK AIRBORNE STATUS
             # ----------------------------------------------------------
             wheel_contacts = []
-            for wheel_joint in [2, 3]:  # rear wheels
+            for wheel_joint in [2, 3, 5, 7]:  # rear wheels
                 contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
                 wheel_contacts.extend(contacts)
             
@@ -129,12 +127,12 @@ def run_sim(cfg):
             # Track airtime
             if is_airborne and not was_airborne:
                 airborne_start_time = current_time
-                print(f"[{current_time:.2f}s] Airborne!")
+                # print(f"[{current_time:.2f}s] Airborne!")
             elif not is_airborne and was_airborne:
                 if airborne_start_time is not None:
                     flight_duration = current_time - airborne_start_time
                     total_airtime += flight_duration
-                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
+                    # print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
                     airborne_start_time = None
             
             # Calculate current airtime

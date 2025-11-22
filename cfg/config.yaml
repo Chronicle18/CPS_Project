@@ -2,7 +2,7 @@ simulation:
   mode: "GUI" # HEADLESS or GUI
   time_step: 0.004166 # 1/240
   gravity: [0, 0, -9.8]
-  max_steps: 800
+  max_steps: 900
   sleep: true # whether to use time.sleep
 
 camera:
@@ -29,33 +29,35 @@ back_camera:
 car:
   urdf: "racecar/racecar.urdf"
   scale: 2.0
-  position: [0, 0, 0.1]
-  speed_profile: "NORMAL" # Options: SLOW, NORMAL, FAST, VERY_FAST
-  wheel_joints: [2, 3, 5, 4]
+  mass: 500
+  position: [0, 0, 0.05]
+  speed_profile: "VERY_FAST" # Options: SLOW, NORMAL, FAST, VERY_FAST
+  front_whls: [5, 7]
+  rear_whls: [2, 3]
   lateral_friction: 1.2
   spinning_friction: 0.02
   rolling_friction: 0.0
 
 speed_profiles:
   SLOW:
-    target_velocity: 60
-    forward_force: 120
+    target_velocity: 25 # 90 kmph
+    forward_force: 52382.9475
     description: "Slow and steady"
   NORMAL:
-    target_velocity: 90
-    forward_force: 220
+    target_velocity: 30 # 108 kmph
+    forward_force: 74726.6975
     description: "Standard speed"
   FAST:
-    target_velocity: 110
-    forward_force: 250
+    target_velocity: 33.33 # 120 kmph
+    forward_force: 91861.4206
     description: "High speed"
   VERY_FAST:
-    target_velocity: 130
-    forward_force: 280
+    target_velocity: 41.67 # 150 kmph
+    forward_force: 142683.2956
     description: "Maximum speed"
 
 cube:
-  mass_ratio: 0.25 # cube_mass = car_mass * mass_ratio
+  mass_ratio: 0.3 # cube_mass = car_mass * mass_ratio
   size_factor: 0.0375 # x times car scale
   position: [0.25, 0, 0.2]
   color: [0, 1, 0, 1]
@@ -73,7 +75,7 @@ world:
 
 ramp:
   length: 2.0
-  width: 2.0
+  width: 3.0
   thickness: 0.1
   angle_deg: 25
   angle_rad: 0.45 # if overriding radian angle
