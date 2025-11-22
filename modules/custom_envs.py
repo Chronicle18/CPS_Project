@@ -2,8 +2,8 @@ import pybullet as p
 import pybullet_data
 import sys
 sys.path.append("modules/")
-from actor import Actor
 from camera import Camera
+import numpy as np
 
 class CarJumpEnv:
     def __init__(self, cfg):
@@ -77,12 +77,16 @@ class CarJumpEnv:
         car_scale = self.cfg['car']['scale']
         car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
 
+        # print car joint info
+        # for i in range (p.getNumJoints(car)):
+        #     print (p.getJointInfo(car,i))
+
         # Get car mass
+        p.changeDynamics(car, -1, mass=self.cfg['car']['mass'])
         dyn = p.getDynamicsInfo(car, -1)
         car_mass = dyn[0]
         print("Car mass:", car_mass)
-        
-
+                
         # ----- internal cube -----
         cube_size = self.cfg['cube']['size_factor'] * car_scale
         cube_mass = car_mass * self.cfg['cube']['mass_ratio']
@@ -99,14 +103,22 @@ class CarJumpEnv:
         )
 
         # Wheels = joints 2 and 3 for rear drive
-        # wheel_joints = [2, 3 ,5, 4]
+        # wheel_joints = [2, 3 ,5, 7]
 
-        for j in self.cfg['car']['wheel_joints']:
+        for j in self.cfg['car']['rear_whls']:
             p.changeDynamics(car, j, 
                             lateralFriction=self.cfg['car']['lateral_friction'], 
                             spinningFriction=self.cfg['car']['spinning_friction'], 
-                            rollingFriction=self.cfg['car']['rolling_friction'])
-
+                            rollingFriction=self.cfg['car']['rolling_friction']
+                            )
+            
+        for j in self.cfg['car']['front_whls']:
+            p.changeDynamics(car, j, 
+                            lateralFriction=self.cfg['car']['lateral_friction'], 
+                            spinningFriction=0.0, 
+                            rollingFriction=0.0
+                            )
+            
         return car, cube
 
 
