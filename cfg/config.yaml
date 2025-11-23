@@ -31,7 +31,7 @@ car:
   scale: 2.0
   mass: 500
   position: [0, 0, 0.05]
-  speed_profile: "VERY_FAST" # Options: SLOW, NORMAL, FAST, VERY_FAST
+  speed_profile: "NORMAL" # Options: SLOW, NORMAL, FAST, VERY_FAST
   front_whls: [5, 7]
   rear_whls: [2, 3]
   lateral_friction: 1.2
@@ -44,16 +44,16 @@ speed_profiles:
     forward_force: 52382.9475
     description: "Slow and steady"
   NORMAL:
-    target_velocity: 30 # 108 kmph
-    forward_force: 74726.6975
+    target_velocity: 45 # 108 kmph
+    forward_force: 7726.6975
     description: "Standard speed"
   FAST:
     target_velocity: 33.33 # 120 kmph
     forward_force: 91861.4206
     description: "High speed"
   VERY_FAST:
-    target_velocity: 41.67 # 150 kmph
-    forward_force: 142683.2956
+    target_velocity: 51.67 # 150 kmph
+    forward_force: 242683.2956
     description: "Maximum speed"
 
 cube:

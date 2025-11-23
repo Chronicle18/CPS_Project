@@ -76,12 +76,30 @@ def run_sim(cfg):
     print(f"Forward Force: {forward_force}")
     print(f"{'='*60}\n")
 
+    # print("\n" + "="*60)
+    # print("JOINT INFORMATION:")
+    # print("="*60)
+    # for i in range(p.getNumJoints(car)):
+    #     joint_info = p.getJointInfo(car, i)
+    #     joint_name = joint_info[1].decode('utf-8')
+    #     joint_type = joint_info[2]
+    #     print(f"Joint {i}: {joint_name} (Type: {joint_type})")
+    # print("="*60 + "\n")
+
+    # Acceleration control
+    ACCELERATION_START_TIME = cfg['car'].get('acceleration_delay', 0.5)  # Default seconds
+    ACCELERATION_RAMP_DURATION = 1.0  # Total time to reach 100% (adjust as needed)
+    acceleration_active = False
+    acceleration_start_timestamp = None
+    
     # Airtime tracking
     airborne_start_time = None
     total_airtime = 0.0
     is_airborne = False
     
     rear_wheel_joints = cfg['car']['rear_whls']
+    front_wheel_joints = cfg['car']['front_whls']
+    steering_joints = [4,6]
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
@@ -90,18 +108,6 @@ def run_sim(cfg):
             pbar.update(1)
             
             current_time = time_step * cfg['simulation']['time_step']
-
-            # ----------------------------------------------------------
-            # DRIVE FORWARD
-            # ----------------------------------------------------------
-            for j in rear_wheel_joints:
-                    p.setJointMotorControl2(
-                        bodyUniqueId=car,
-                        jointIndex=j,
-                        controlMode=p.VELOCITY_CONTROL,
-                        targetVelocity=target_velocity,
-                        force=forward_force
-                    )
 
             # ----------------------------------------------------------
             # CAR STATE
@@ -114,12 +120,13 @@ def run_sim(cfg):
             current_speed = np.linalg.norm(car_vel)
             
             # ----------------------------------------------------------
-            # CHECK AIRBORNE STATUS
+            # CHECK AIRBORNE STATUS (with safety check for None)
             # ----------------------------------------------------------
             wheel_contacts = []
-            for wheel_joint in [2, 3, 5, 7]:  # rear wheels
+            for wheel_joint in [2, 3, 5, 7]:  # all wheels
                 contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
-                wheel_contacts.extend(contacts)
+                if contacts is not None:  # Safety check
+                    wheel_contacts.extend(contacts)
             
             was_airborne = is_airborne
             is_airborne = len(wheel_contacts) == 0
@@ -127,12 +134,12 @@ def run_sim(cfg):
             # Track airtime
             if is_airborne and not was_airborne:
                 airborne_start_time = current_time
-                # print(f"[{current_time:.2f}s] Airborne!")
+                print(f"[{current_time:.2f}s] Airborne!")
             elif not is_airborne and was_airborne:
                 if airborne_start_time is not None:
                     flight_duration = current_time - airborne_start_time
                     total_airtime += flight_duration
-                    # print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
+                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
                     airborne_start_time = None
             
             # Calculate current airtime
@@ -140,6 +147,83 @@ def run_sim(cfg):
                 current_airtime = current_time - airborne_start_time
             else:
                 current_airtime = 0.0
+
+            # ----------------------------------------------------------
+            # KEEP FRONT WHEELS STRAIGHT
+            # ----------------------------------------------------------
+            for j in steering_joints:
+                p.setJointMotorControl2(
+                    bodyUniqueId=car,
+                    jointIndex=j,
+                    controlMode=p.POSITION_CONTROL,
+                    targetPosition=0,  # Straight ahead
+                    force=1000
+                )
+
+            # ----------------------------------------------------------
+            # ACCELERATION LOGIC
+            # ----------------------------------------------------------
+            # Start acceleration after delay
+            if current_time >= ACCELERATION_START_TIME and not acceleration_active and not is_airborne:
+                acceleration_active = True
+                acceleration_start_timestamp = current_time
+                print(f"[{current_time:.2f}s] Acceleration started!")
+            
+            # Stop acceleration when airborne
+            if is_airborne and acceleration_active:
+                acceleration_active = False
+                print(f"[{current_time:.2f}s] Airborne - stopping acceleration")
+
+            # ----------------------------------------------------------
+            # DRIVE FORWARD WITH GRADUAL ACCELERATION
+            # ----------------------------------------------------------
+            if acceleration_active and acceleration_start_timestamp is not None:
+                # Calculate elapsed time since acceleration started
+                elapsed_acceleration_time = current_time - acceleration_start_timestamp
+                
+                # Gradual acceleration: 0% -> 20% -> 40% -> 60% -> 80% -> 100%
+                if elapsed_acceleration_time < ACCELERATION_RAMP_DURATION * 0.2:  # 0-20%
+                    power_fraction = 0.2
+                elif elapsed_acceleration_time < ACCELERATION_RAMP_DURATION * 0.4:  # 20-40%
+                    power_fraction = 0.4
+                elif elapsed_acceleration_time < ACCELERATION_RAMP_DURATION * 0.6:  # 40-60%
+                    power_fraction = 0.6
+                elif elapsed_acceleration_time < ACCELERATION_RAMP_DURATION * 0.8:  # 60-80%
+                    power_fraction = 0.8
+                else:  # 80-100%
+                    power_fraction = 1.0
+                
+                current_velocity = target_velocity * power_fraction
+                current_force = forward_force * power_fraction
+                
+                # Apply motor control to rear wheels
+                for j in rear_wheel_joints:
+                    p.setJointMotorControl2(
+                        bodyUniqueId=car,
+                        jointIndex=j,
+                        controlMode=p.VELOCITY_CONTROL,
+                        targetVelocity=current_velocity,
+                        force=current_force
+                    )
+                
+                # DEBUG: Print wheel states every 50 steps
+                # if time_step % 50 == 0:
+                #     print(f"\n[DEBUG {current_time:.2f}s] Power: {power_fraction*100:.0f}%")
+                #     print(f"Car position: {car_pos}")
+                #     print(f"Car orientation (yaw): {p.getEulerFromQuaternion(car_orn)[2]:.3f} rad")
+                #     for j in rear_wheel_joints:
+                #         joint_state = p.getJointState(car, j)
+                #         print(f"  Wheel {j}: velocity={joint_state[1]:.2f}")
+            else:
+                # No acceleration - wheels coast
+                for j in rear_wheel_joints:
+                    p.setJointMotorControl2(
+                        bodyUniqueId=car,
+                        jointIndex=j,
+                        controlMode=p.VELOCITY_CONTROL,
+                        targetVelocity=0,
+                        force=0
+                    )
 
             # ----------------------------------------------------------
             # CHECK LANDING
@@ -184,7 +268,7 @@ def run_sim(cfg):
             # Prepare overlay data
             overlay_data = {
                 'current_speed': current_speed,
-                'target_speed': target_velocity,
+                'target_speed': target_velocity / 10,  # Convert to m/s if needed
                 'airtime': current_airtime if is_airborne else total_airtime,
                 'is_airborne': is_airborne
             }
