@@ -99,7 +99,7 @@ def run_sim(cfg):
     total_airtime = 0.0
     is_airborne = False
     
-    wheel_joints = cfg['car']['wheel_joints']
+    rear_wheel_joints = cfg['car']['rear_whls']
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
@@ -112,8 +112,11 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # DRIVE FORWARD
             # ----------------------------------------------------------
+            wheel_joints = cfg['car']['wheel_joints']
+            drive_wheels = cfg['car']['rear_whls'] # Driving rear wheels
+
             for j in wheel_joints:
-                if j in [4, 5]:  # front wheels (FWD)
+                if j in drive_wheels:
                     p.setJointMotorControl2(
                         bodyUniqueId=car,
                         jointIndex=j,
@@ -121,7 +124,7 @@ def run_sim(cfg):
                         targetVelocity=target_velocity,
                         force=forward_force
                     )
-                else: # rear wheels (free spinning)
+                else:
                     p.setJointMotorControl2(
                         bodyUniqueId=car,
                         jointIndex=j,
@@ -144,7 +147,7 @@ def run_sim(cfg):
             # CHECK AIRBORNE STATUS
             # ----------------------------------------------------------
             wheel_contacts = []
-            for wheel_joint in [2, 3]:  # rear wheels
+            for wheel_joint in cfg['car']['wheel_joints']:
                 contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
                 wheel_contacts.extend(contacts)
             
@@ -154,12 +157,12 @@ def run_sim(cfg):
             # Track airtime
             if is_airborne and not was_airborne:
                 airborne_start_time = current_time
-                print(f"[{current_time:.2f}s] Airborne!")
+                # print(f"[{current_time:.2f}s] Airborne!")
             elif not is_airborne and was_airborne:
                 if airborne_start_time is not None:
                     flight_duration = current_time - airborne_start_time
                     total_airtime += flight_duration
-                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
+                    # print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
                     airborne_start_time = None
             
             # Calculate current airtime
