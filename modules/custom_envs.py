@@ -31,6 +31,9 @@ class CarJumpEnv:
         elif self.cfg['simulation']['mode'] == "HEADLESS":
             cid = p.connect(p.DIRECT)      # p.GUI     # GUI mode ON
     
+        # Enable GPU acceleration
+        p.setPhysicsEngineParameter(numSolverIterations=10, enableConeFriction=1)
+        
         p.setTimeStep(self.cfg['simulation']['time_step'])
         p.setGravity(*self.cfg['simulation']['gravity'])
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
