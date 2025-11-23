@@ -1,0 +1,125 @@
+import pybullet as p
+import pybullet_data
+import sys
+sys.path.append("modules/")
+from camera import Camera
+import numpy as np
+
+class CarJumpEnv:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.cid = self.init_sim()
+
+        self.plane, self.ramp = self.load_world()
+        self.car, self.cube = self.load_car_with_cube()
+        self.main_cam = Camera(self.car, camera_cfg=cfg['camera'], sim_mode=cfg['simulation']['mode'])
+        self.pov_cam = Camera(self.car, camera_cfg=cfg['back_camera'], sim_mode=cfg['simulation']['mode']) if 'back_camera' in cfg else None
+    
+    def init_sim(self):
+        if self.cfg['simulation']['mode'] == "GUI":
+            cid = p.connect(p.GUI)
+            p.resetDebugVisualizerCamera(
+                cameraDistance=4,
+                cameraYaw=0,
+                cameraPitch=-20,
+                cameraTargetPosition=[0, 0, 0.5]
+            )
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)              # hides GUI side panels
+            p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, 0)
+        elif self.cfg['simulation']['mode'] == "HEADLESS":
+            cid = p.connect(p.DIRECT)      # p.GUI     # GUI mode ON
+    
+        p.setTimeStep(self.cfg['simulation']['time_step'])
+        p.setGravity(*self.cfg['simulation']['gravity'])
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+        return cid
+    
+    def reset_sim():
+        pass
+    
+    def load_world(self):
+        plane = p.loadURDF(self.cfg['world']['plane_urdf'])
+
+        # ----- Ramp -----
+        # A long thin box rotated about Y-axis
+        ramp_len = self.cfg['ramp']['length']
+        ramp_width = self.cfg['ramp']['width']
+        # ramp_height = ramp_len * math.sin(cfg['ramp']['angle_rad'])
+        ramp_thickness = self.cfg['ramp']['thickness']
+
+        col_id = p.createCollisionShape(
+            shapeType=p.GEOM_BOX,
+            halfExtents=[ramp_len/2, ramp_width/2, ramp_thickness/2]
+        )
+        vis_id = p.createVisualShape(
+            shapeType=p.GEOM_BOX,
+            halfExtents=[ramp_len/2, ramp_width/2, ramp_thickness/2],
+            rgbaColor=self.cfg['ramp']['color']
+        )
+
+        # Position the ramp in front of the car
+        ramp_pos = self.cfg['ramp']['position']
+        ramp_orn = p.getQuaternionFromEuler([0, -self.cfg['ramp']['angle_rad'], 0])
+
+        ramp = p.createMultiBody(
+            baseCollisionShapeIndex=col_id,
+            baseVisualShapeIndex=vis_id,
+            basePosition=ramp_pos,
+            baseOrientation=ramp_orn
+        )
+
+        return plane, ramp
+
+    def load_car_with_cube(self):
+        car_scale = self.cfg['car']['scale']
+        car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
+
+        # print car joint info
+        # for i in range (p.getNumJoints(car)):
+        #     print (p.getJointInfo(car,i))
+
+        # Get car mass
+        p.changeDynamics(car, -1, mass=self.cfg['car']['mass'])
+        dyn = p.getDynamicsInfo(car, -1)
+        car_mass = dyn[0]
+        print("Car mass:", car_mass)
+                
+        # ----- internal cube -----
+        cube_size = self.cfg['cube']['size_factor'] * car_scale
+        cube_mass = car_mass * self.cfg['cube']['mass_ratio']
+
+        cube_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size])
+        cube_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size],
+                                    rgbaColor=self.cfg['cube']['color'])
+
+        cube = p.createMultiBody(
+            baseMass=cube_mass,
+            baseCollisionShapeIndex=cube_col,
+            baseVisualShapeIndex=cube_vis,
+            basePosition=self.cfg['cube']['position']
+        )
+
+        # Wheels = joints 2 and 3 for rear drive
+        # wheel_joints = [2, 3 ,5, 7]
+
+        for j in self.cfg['car']['rear_whls']:
+            p.changeDynamics(car, j, 
+                            lateralFriction=self.cfg['car']['lateral_friction'], 
+                            spinningFriction=self.cfg['car']['spinning_friction'], 
+                            rollingFriction=self.cfg['car']['rolling_friction']
+                            )
+            
+        for j in self.cfg['car']['front_whls']:
+            p.changeDynamics(car, j, 
+                            lateralFriction=self.cfg['car']['lateral_friction'], 
+                            spinningFriction=0.0, 
+                            rollingFriction=0.0
+                            )
+            
+        return car, cube
+
+
+
