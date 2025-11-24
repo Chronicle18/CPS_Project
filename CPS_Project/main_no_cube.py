@@ -217,8 +217,10 @@ def run_sim(cfg):
             # NO MID-AIR CONTROL - CUBE STAYS FIXED
             # ----------------------------------------------------------
             # Cube remains at initial position (no PID control)
-            cube_world = geom.local_to_world(car, initial_cube_pos)
-            p.resetBasePositionAndOrientation(cube, cube_world, car_orn)
+            # Only update cube position if cube exists (not in baseline mode)
+            if cube is not None:
+                cube_world = geom.local_to_world(car, initial_cube_pos)
+                p.resetBasePositionAndOrientation(cube, cube_world, car_orn)
 
             # ----------------------------------------------------------
             # FOLLOW CAMERA

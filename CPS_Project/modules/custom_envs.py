@@ -86,21 +86,30 @@ class CarJumpEnv:
         dyn = p.getDynamicsInfo(car, -1)
         car_mass = dyn[0]
         print("Car mass:", car_mass)
-                
+        
+        # Check if baseline mode is enabled
+        is_baseline = self.cfg['simulation'].get('baseline', False)
+        
         # ----- internal cube -----
-        cube_size = self.cfg['cube']['size_factor'] * car_scale
-        cube_mass = car_mass * self.cfg['cube']['mass_ratio']
+        if is_baseline:
+            # Baseline mode: don't spawn cube
+            cube = None
+            print("Baseline mode: Cube will not spawn")
+        else:
+            # Normal mode: spawn cube
+            cube_size = self.cfg['cube']['size_factor'] * car_scale
+            cube_mass = car_mass * self.cfg['cube']['mass_ratio']
 
-        cube_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size])
-        cube_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size],
-                                    rgbaColor=self.cfg['cube']['color'])
+            cube_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size])
+            cube_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[cube_size, cube_size, cube_size],
+                                        rgbaColor=self.cfg['cube']['color'])
 
-        cube = p.createMultiBody(
-            baseMass=cube_mass,
-            baseCollisionShapeIndex=cube_col,
-            baseVisualShapeIndex=cube_vis,
-            basePosition=self.cfg['cube']['position']
-        )
+            cube = p.createMultiBody(
+                baseMass=cube_mass,
+                baseCollisionShapeIndex=cube_col,
+                baseVisualShapeIndex=cube_vis,
+                basePosition=self.cfg['cube']['position']
+            )
 
         # Wheels = joints 2 and 3 for rear drive
         # wheel_joints = [2, 3 ,5, 7]

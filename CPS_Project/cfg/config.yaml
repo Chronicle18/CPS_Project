@@ -4,6 +4,7 @@ simulation:
   gravity: [0, 0, -9.8]
   max_steps: 900
   sleep: true # whether to use time.sleep
+  baseline: false # if true, cube will not spawn (baseline mode)
 
 camera:
   width: 640

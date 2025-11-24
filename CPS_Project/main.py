@@ -236,19 +236,21 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # MID-AIR CONTROL
             # ----------------------------------------------------------
-            pitch_error = cfg['pid']['target_pitch'] - pitch
-            cube_shift = pid.step(pitch_error)
+            # Only control cube if it exists (not in baseline mode)
+            if cube is not None:
+                pitch_error = cfg['pid']['target_pitch'] - pitch
+                cube_shift = pid.step(pitch_error)
 
-            # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
+                # Limit shift
+                cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
 
-            current_local_cube_pos = [cube_shift, 0, 0.2]
+                current_local_cube_pos = [cube_shift, 0, 0.2]
 
-            # ----------------------------------------------------------
-            # UPDATE CUBE POSITION
-            # ----------------------------------------------------------
-            cube_world = geom.local_to_world(car, current_local_cube_pos)
-            p.resetBasePositionAndOrientation(cube, cube_world, car_orn)
+                # ----------------------------------------------------------
+                # UPDATE CUBE POSITION
+                # ----------------------------------------------------------
+                cube_world = geom.local_to_world(car, current_local_cube_pos)
+                p.resetBasePositionAndOrientation(cube, cube_world, car_orn)
 
             # ----------------------------------------------------------
             # FOLLOW CAMERA
