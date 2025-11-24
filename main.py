@@ -10,7 +10,7 @@ from modules.controllers import CubeController
 from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
-import utils.monitor_info as monitor
+from utils.monitor_info import MonitorInfo
 
 parser = argparse.ArgumentParser(description="Car Jump Simulation with Internal Mass Control")
 parser.add_argument('--config', type=str, default='cfg/config.yaml', help='Path to configuration YAML file')
@@ -34,7 +34,6 @@ else:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg['logging']['video_file'] = f"car_jump_{timestamp}.mp4"
 
-TASK_STATES = {"ascend" : False, "launched" : False, "landed" : False}
 MAX_STEPS = cfg['simulation']['max_steps']
 
 os.makedirs(cfg['logging']['save_dir'], exist_ok=True)
@@ -82,6 +81,7 @@ def run_sim(cfg):
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
     vid_writer = VideoWriter(video_path, frame_size=(cfg['camera']['width'], cfg['camera']['height']), fps=cfg['logging']['video_fps'])
+    monitor = MonitorInfo(cfg)
 
     # Get speed profile settings
     selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
@@ -111,11 +111,6 @@ def run_sim(cfg):
     ACCELERATION_RAMP_DURATION = 2.0  # Increased duration for smoother acceleration
     acceleration_active = False
     acceleration_start_timestamp = None
-    
-    # Airtime tracking
-    airborne_start_time = None
-    total_airtime = 0.0
-    is_airborne = False
     
     rear_wheel_joints = cfg['car']['rear_whls']
     front_wheel_joints = cfg['car']['front_whls']
@@ -159,40 +154,21 @@ def run_sim(cfg):
             # CAR STATE
             # ----------------------------------------------------------
             car_pos, car_orn = p.getBasePositionAndOrientation(car)
-            car_vel, car_ang_vel = p.getBaseVelocity(car)
-            _, pitch, _ = p.getEulerFromQuaternion(car_orn)
+            roll, pitch, yaw = p.getEulerFromQuaternion(car_orn)
+            current_speed, curr_ang_vel = monitor.get_velocity(car)
+            
+            # ----------------------------------------------------------
+            # CHECK LANDING
+            # ----------------------------------------------------------
+            if monitor.hasLanded(car, plane, ramp, time_step):
+                print("Landed at step:", time_step)
+                time_step = MAX_STEPS - 200
+                pbar.n = time_step
+                if not monitor.landing_roll and not monitor.landing_pitch:
+                    monitor.landing_pitch, monitor.landing_roll = pitch, roll
 
-            # Calculate current speed
-            current_speed = np.linalg.norm(car_vel)
-            
-            # ----------------------------------------------------------
-            # CHECK AIRBORNE STATUS (with safety check for None)
-            # ----------------------------------------------------------
-            wheel_contacts = []
-            for wheel_joint in cfg['car']['wheel_joints']:
-                contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
-                if contacts is not None:  # Safety check
-                    wheel_contacts.extend(contacts)
-            
-            was_airborne = is_airborne
-            is_airborne = len(wheel_contacts) == 0
-            
-            # Track airtime
-            if is_airborne and not was_airborne:
-                airborne_start_time = current_time
-                print(f"[{current_time:.2f}s] Airborne!")
-            elif not is_airborne and was_airborne:
-                if airborne_start_time is not None:
-                    flight_duration = current_time - airborne_start_time
-                    total_airtime += flight_duration
-                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
-                    airborne_start_time = None
-            
-            # Calculate current airtime
-            if is_airborne and airborne_start_time is not None:
-                current_airtime = current_time - airborne_start_time
-            else:
-                current_airtime = 0.0
+            # CHECK AIRBORNE STATUS
+            current_airtime = monitor.check_airborne_status(car, plane, time_step)
 
             # ----------------------------------------------------------
             # KEEP FRONT WHEELS STRAIGHT
@@ -210,12 +186,12 @@ def run_sim(cfg):
             # YAW STABILIZATION - Keep car driving straight
             # ----------------------------------------------------------
             _, _, yaw = p.getEulerFromQuaternion(car_orn)
-            if not is_airborne:
+            if not monitor.is_airborne:
                 # Apply corrective torque to keep car straight
                 yaw_error = 0 - yaw  # Target is 0 yaw (straight)
                 corrective_torque = yaw_error * 2000  # Increased proportional control
                 # Also dampen yaw angular velocity
-                yaw_damping = -car_ang_vel[2] * 100
+                yaw_damping = -curr_ang_vel[2] * 100
                 total_torque = corrective_torque + yaw_damping
                 p.applyExternalTorque(car, -1, [0, 0, total_torque], flags=p.WORLD_FRAME)
 
@@ -223,15 +199,15 @@ def run_sim(cfg):
             # ACCELERATION LOGIC
             # ----------------------------------------------------------
             # Start acceleration after delay
-            if current_time >= ACCELERATION_START_TIME and not acceleration_active and not is_airborne:
+            if current_time >= ACCELERATION_START_TIME and not acceleration_active and not monitor.is_airborne:
                 acceleration_active = True
                 acceleration_start_timestamp = current_time
                 print(f"[{current_time:.2f}s] Acceleration started!")
             
             # Stop acceleration when airborne
-            if is_airborne and acceleration_active:
-                acceleration_active = False
-                print(f"[{current_time:.2f}s] Airborne - stopping acceleration")
+            # if monitor.is_airborne and acceleration_active:
+            #     acceleration_active = False
+            #     print(f"[{current_time:.2f}s] Airborne - stopping acceleration")
 
             # ----------------------------------------------------------
             # DRIVE FORWARD WITH GRADUAL ACCELERATION
@@ -284,23 +260,11 @@ def run_sim(cfg):
                         force=0
                     )
 
-            # ----------------------------------------------------------
-            # CHECK LANDING
-            # ----------------------------------------------------------
-            if monitor.hasLanded(car, plane, ramp, TASK_STATES):
-                print("Landed at step:", time_step)
-                time_step = MAX_STEPS - 200
-                pbar.n = time_step
-
-            # ----------------------------------------------------------
-            # MID-AIR CONTROL
-            # ----------------------------------------------------------
             
             # ----------------------------------------------------------
             # MID-AIR CONTROL
             # ----------------------------------------------------------
-            
-            if is_airborne:
+            if monitor.is_airborne:
                 cube_shift, local_center_x = controller.get_control_action(pitch, time_step)
             else:
                 # Center the cube when on ground/ramp
@@ -334,18 +298,24 @@ def run_sim(cfg):
             # target_velocity is angular velocity (rad/s), convert to linear speed: v = ω * r
             target_linear_speed = target_velocity * wheel_radius
             overlay_data = {
+                'timestep' : time_step,
                 'current_speed': current_speed,
-                'target_speed': target_linear_speed,
-                'airtime': current_airtime if is_airborne else total_airtime,
-                'is_airborne': is_airborne
+                'target_speed': target_linear_speed / 10,  # Convert to m/s if needed
+                'airtime': current_airtime if monitor.is_airborne else monitor.total_airtime,
+                'is_airborne': monitor.is_airborne
             }
             
             vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data)
     
+    if monitor.task_states['landed']:
+        monitor.evaluate_episode()
+    else:
+        print("Car never landed.")
+    
     p.disconnect()
     vid_writer.release()
-    
-    print(f"\nTotal airtime: {total_airtime:.2f}s")
+
+    print(f"\nTotal airtime: {monitor.total_airtime:.2f}s")
     print("Video saved.")
     print("Simulation complete.")
 

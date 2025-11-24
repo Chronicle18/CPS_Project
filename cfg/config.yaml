@@ -1,8 +1,8 @@
 simulation:
-  mode: "GUI" # HEADLESS or GUI
+  mode: "HEADLESS" # HEADLESS or GUI
   time_step: 0.004166 # 1/240
-  gravity: [0, 0, -12.0]  # Increased gravity for better stability
-  max_steps: 900
+  gravity: [0, 0, -9.8]
+  max_steps: 1200
   sleep: true # whether to use time.sleep
 
 camera:
@@ -75,7 +75,7 @@ world:
   plane_urdf: "plane.urdf"
 
 ramp:
-  length: 2.0
+  length: 3.0
   width: 3.0
   thickness: 0.1
   angle_deg: 25
