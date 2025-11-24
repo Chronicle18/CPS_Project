@@ -139,7 +139,7 @@ class MonitorInfo:
             wheel_touch_score = math.exp(-delta_t*k) # keeps score between 0 and 1 (higher is greater)
         else:
             print("All wheels did not land")
-            wheel_touch_score = -2
+            wheel_touch_score = 0
         
         print(f"Wheel touch score: {wheel_touch_score*100:.2f}")
 

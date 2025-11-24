@@ -185,7 +185,7 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # YAW STABILIZATION - Keep car driving straight
             # ----------------------------------------------------------
-            _, _, yaw = p.getEulerFromQuaternion(car_orn)
+            # _, _, yaw = p.getEulerFromQuaternion(car_orn)
             if not monitor.is_airborne:
                 # Apply corrective torque to keep car straight
                 yaw_error = 0 - yaw  # Target is 0 yaw (straight)
