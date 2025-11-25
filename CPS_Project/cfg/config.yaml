@@ -2,9 +2,9 @@ simulation:
   mode: "GUI" # HEADLESS or GUI
   time_step: 0.004166 # 1/240
   gravity: [0, 0, -9.8]
-  max_steps: 900
+  max_steps: 1200
   sleep: true # whether to use time.sleep
-  baseline: false # if true, cube will not spawn (baseline mode)
+  baseline: true # if true, cube will not spawn (baseline mode)
 
 camera:
   width: 640
@@ -84,7 +84,7 @@ ramp:
   color: [0.8, 0.2, 0.2, 1]
 
 logging:
-  save_dir: "results/"
+  save_dir: "../results_baseline/"
   video_file: "car_jump.mp4"
   video_fps: 30
   debug_text: true
