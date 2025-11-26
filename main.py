@@ -6,7 +6,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 from utils.videowriter import VideoWriter
-from modules.controllers import PID
+from modules.controllers import CubeController
 from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
@@ -53,12 +53,32 @@ def run_sim(cfg):
     main_cam = env.main_cam
     pov_cam = env.pov_cam
 
-    # Move cube initially at center
-    current_local_cube_pos = cfg['cube']['local_initial_pos']
-    time_step = 0
+    # Calculate cube movement limits based on car geometry
+    aabb_min, aabb_max = p.getAABB(car)
+    car_length = aabb_max[0] - aabb_min[0]
+    aabb_center_world = [
+        (aabb_min[0] + aabb_max[0]) / 2,
+        (aabb_min[1] + aabb_max[1]) / 2,
+        (aabb_min[2] + aabb_max[2]) / 2
+    ]
+    local_center = geom.world_to_local(car, aabb_center_world)
+    cube_size = cfg['cube']['size_factor'] * cfg['car']['scale']
+    max_shift = (car_length / 2) - (cube_size / 2)  # Full length minus cube size
+    limit_front = max(max_shift, 0.5)  # Ensure at least 0.5m
+    limit_back = max(max_shift, 0.02)
+    print(f"Car length: {car_length:.3f}, Cube size: {cube_size:.3f}, Max shift: {max_shift:.3f}")
+
+    # Adjust center to make limits equidistant from cube center
+    cube_center_x = (limit_front + limit_back) / 2
+    print(f"Adjusted cube center: {cube_center_x:.3f}")
 
     # initialize controller
-    pid = PID(cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'])
+    controller = CubeController(cfg['pid'], limit_front, limit_back, cube_center_x)
+    
+    # Initial cube position
+    current_local_cube_pos = [controller.local_center_x, 0, 0.2]
+    time_step = 0
+
 
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
@@ -95,7 +115,7 @@ def run_sim(cfg):
 
     # Acceleration control
     ACCELERATION_START_TIME = cfg['car'].get('acceleration_delay', 0.5)  # Default seconds
-    ACCELERATION_RAMP_DURATION = 1.0  # Total time to reach 100% (adjust as needed)
+    ACCELERATION_RAMP_DURATION = 2.0  # Increased duration for smoother acceleration
     acceleration_active = False
     acceleration_start_timestamp = None
     
@@ -107,6 +127,10 @@ def run_sim(cfg):
     rear_wheel_joints = cfg['car']['rear_whls']
     front_wheel_joints = cfg['car']['front_whls']
     steering_joints = [4,6]
+    
+    # Estimate wheel radius from car scale (typical racecar wheel ~0.03-0.05m radius scaled by car scale)
+    wheel_radius = 0.04 * cfg['car']['scale']  # Approximate wheel radius in meters
+    print(f"Estimated wheel radius: {wheel_radius:.3f}m")
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
@@ -115,6 +139,28 @@ def run_sim(cfg):
             pbar.update(1)
             
             current_time = time_step * cfg['simulation']['time_step']
+
+            # ----------------------------------------------------------
+            # DRIVE FORWARD
+            # ----------------------------------------------------------
+            for j in rear_wheel_joints:
+                    p.setJointMotorControl2(
+                        bodyUniqueId=car,
+                        jointIndex=j,
+                        controlMode=p.VELOCITY_CONTROL,
+                        targetVelocity=target_velocity,
+                        force=forward_force
+                    )
+            
+            # Allow front wheels to spin freely (passive rotation)
+            for j in front_wheel_joints:
+                p.setJointMotorControl2(
+                    bodyUniqueId=car,
+                    jointIndex=j,
+                    controlMode=p.VELOCITY_CONTROL,
+                    targetVelocity=0,
+                    force=0  # No force allows free spinning
+                )
 
             # ----------------------------------------------------------
             # CAR STATE
@@ -130,7 +176,7 @@ def run_sim(cfg):
             # CHECK AIRBORNE STATUS (with safety check for None)
             # ----------------------------------------------------------
             wheel_contacts = []
-            for wheel_joint in [2, 3, 5, 7]:  # all wheels
+            for wheel_joint in cfg['car']['wheel_joints']:
                 contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
                 if contacts is not None:  # Safety check
                     wheel_contacts.extend(contacts)
@@ -164,8 +210,21 @@ def run_sim(cfg):
                     jointIndex=j,
                     controlMode=p.POSITION_CONTROL,
                     targetPosition=0,  # Straight ahead
-                    force=1000
+                    force=5000  # Increased force for better stability
                 )
+            
+            # ----------------------------------------------------------
+            # YAW STABILIZATION - Keep car driving straight
+            # ----------------------------------------------------------
+            _, _, yaw = p.getEulerFromQuaternion(car_orn)
+            if not is_airborne:
+                # Apply corrective torque to keep car straight
+                yaw_error = 0 - yaw  # Target is 0 yaw (straight)
+                corrective_torque = yaw_error * 2000  # Increased proportional control
+                # Also dampen yaw angular velocity
+                yaw_damping = -car_ang_vel[2] * 100
+                total_torque = corrective_torque + yaw_damping
+                p.applyExternalTorque(car, -1, [0, 0, total_torque], flags=p.WORLD_FRAME)
 
             # ----------------------------------------------------------
             # ACCELERATION LOGIC
@@ -267,13 +326,19 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # MID-AIR CONTROL
             # ----------------------------------------------------------
-            pitch_error = cfg['pid']['target_pitch'] - pitch
-            cube_shift = pid.step(pitch_error)
-
-            # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
-
-            current_local_cube_pos = [cube_shift, 0, 0.2]
+            
+            # ----------------------------------------------------------
+            # MID-AIR CONTROL
+            # ----------------------------------------------------------
+            
+            if is_airborne:
+                cube_shift, local_center_x = controller.get_control_action(pitch, time_step)
+            else:
+                # Center the cube when on ground/ramp
+                cube_shift = 0.0
+                local_center_x = controller.local_center_x
+                
+            current_local_cube_pos = [cube_shift + local_center_x, 0, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
@@ -297,9 +362,11 @@ def run_sim(cfg):
             rgb = main_cam.get_image()
             
             # Prepare overlay data
+            # target_velocity is angular velocity (rad/s), convert to linear speed: v = ω * r
+            target_linear_speed = target_velocity * wheel_radius
             overlay_data = {
                 'current_speed': current_speed,
-                'target_speed': target_velocity / 10,  # Convert to m/s if needed
+                'target_speed': target_linear_speed,
                 'airtime': current_airtime if is_airborne else total_airtime,
                 'is_airborne': is_airborne
             }
