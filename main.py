@@ -68,6 +68,7 @@ def run_sim(cfg):
     evaluator = LandingEvaluator(cfg.get('landing_evaluation', {}))
     pre_landing_metrics = []
     landing_metrics = None
+    display_landing_report_frames = 0  # Counter for displaying landing report
 
     # Get speed profile settings
     selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
@@ -257,6 +258,9 @@ def run_sim(cfg):
                 print_landing_report(landing_metrics, evaluator)
                 print(f"\nOverall Landing Performance Score: {evaluation['improvement_score']:.1f}/100")
                 
+                # Display landing report on video for several frames (approx 2 seconds)
+                display_landing_report_frames = int(cfg['logging']['video_fps'] * 3)  # 3 seconds
+                
                 time_step = MAX_STEPS - 200
                 pbar.n = time_step
 
@@ -300,7 +304,13 @@ def run_sim(cfg):
                 'is_airborne': is_airborne
             }
             
-            vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data)
+            # Pass landing metrics if we're displaying the report
+            current_landing_metrics = None
+            if display_landing_report_frames > 0 and landing_metrics is not None:
+                current_landing_metrics = landing_metrics
+                display_landing_report_frames -= 1
+            
+            vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data, landing_metrics=current_landing_metrics)
     
     p.disconnect()
     vid_writer.release()
