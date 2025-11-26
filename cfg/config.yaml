@@ -1,7 +1,7 @@
 simulation:
   mode: "GUI" # HEADLESS or GUI
   time_step: 0.004166 # 1/240
-  gravity: [0, 0, -9.8]
+  gravity: [0, 0, -12.0]  # Increased gravity for better stability
   max_steps: 900
   sleep: true # whether to use time.sleep
 
@@ -31,43 +31,44 @@ car:
   scale: 2.0
   mass: 500
   position: [0, 0, 0.05]
-  speed_profile: "NORMAL" # Options: SLOW, NORMAL, FAST, VERY_FAST
+  speed_profile: "VERY_FAST" # Options: SLOW, NORMAL, FAST, VERY_FAST
   front_whls: [5, 7]
   rear_whls: [2, 3]
-  lateral_friction: 1.2
+  wheel_joints: [2, 3, 5, 7]
+  lateral_friction: 2.5  # Increased for better straight-line stability
   spinning_friction: 0.02
   rolling_friction: 0.0
 
 speed_profiles:
   SLOW:
-    target_velocity: 25 # 90 kmph
-    forward_force: 52382.9475
+    target_velocity: 50 # ~18 m/s (65 km/h)
+    forward_force: 50000
     description: "Slow and steady"
   NORMAL:
-    target_velocity: 45 # 108 kmph
-    forward_force: 7726.6975
+    target_velocity: 100 # ~36 m/s (130 km/h)
+    forward_force: 100000
     description: "Standard speed"
   FAST:
-    target_velocity: 33.33 # 120 kmph
-    forward_force: 91861.4206
+    target_velocity: 150 # ~54 m/s (194 km/h)
+    forward_force: 150000
     description: "High speed"
   VERY_FAST:
-    target_velocity: 51.67 # 150 kmph
-    forward_force: 242683.2956
+    target_velocity: 200 # ~72 m/s (259 km/h)
+    forward_force: 200000
     description: "Maximum speed"
 
 cube:
-  mass_ratio: 0.3 # cube_mass = car_mass * mass_ratio
-  size_factor: 0.0375 # x times car scale
+  mass_ratio: 0.4 # cube_mass = car_mass * mass_ratio (increased for better control)
+  size_factor: 0.025 # x times car scale (increased for visibility)
   position: [0.25, 0, 0.2]
-  color: [0, 1, 0, 1]
-  local_initial_pos: [0.25, 0, 0.2]
-  limit_x: 0.25 # for PID pitch control
+  color: [0, 1, 0, 1]  # Bright green
+  # local_initial_pos: [0.25, 0, 0.2]
+  limit_x: 0.7        # for PID pitch control (increased range)
 
 pid:
-  kp: 6.0
-  ki: 0.0
-  kd: 0.6
+  kp: 25.0
+  ki: 0.1
+  kd: 2.0
   target_pitch: 0.0
 
 world:
@@ -78,7 +79,7 @@ ramp:
   width: 3.0
   thickness: 0.1
   angle_deg: 25
-  angle_rad: 0.45 # if overriding radian angle
+  angle_rad: 0.45
   position: [8, 0, 0.2]
   color: [0.8, 0.2, 0.2, 1]
 
@@ -87,3 +88,9 @@ logging:
   video_file: "car_jump.mp4"
   video_fps: 30
   debug_text: true
+
+landing_evaluation:
+  uprightness_threshold: 30 # Degrees (0 = perfectly upright, 90 = sideways)
+  velocity_threshold: 5.0 # m/s
+  vertical_velocity_threshold: 2.0 # m/s
+  stability_threshold: 50 # Score out of 100

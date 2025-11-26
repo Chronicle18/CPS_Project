@@ -31,6 +31,9 @@ class CarJumpEnv:
         elif self.cfg['simulation']['mode'] == "HEADLESS":
             cid = p.connect(p.DIRECT)      # p.GUI     # GUI mode ON
     
+        # Enable GPU acceleration
+        p.setPhysicsEngineParameter(numSolverIterations=10, enableConeFriction=1)
+        
         p.setTimeStep(self.cfg['simulation']['time_step'])
         p.setGravity(*self.cfg['simulation']['gravity'])
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -74,20 +77,26 @@ class CarJumpEnv:
         return plane, ramp
 
     def load_car_with_cube(self):
-        car_scale = self.cfg['car']['scale']
-        car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
-
-        # print car joint info
-        # for i in range (p.getNumJoints(car)):
-        #     print (p.getJointInfo(car,i))
-
+        car = self.load_car()
+        
         # Get car mass
         p.changeDynamics(car, -1, mass=self.cfg['car']['mass'])
         dyn = p.getDynamicsInfo(car, -1)
         car_mass = dyn[0]
         print("Car mass:", car_mass)
-                
-        # ----- internal cube -----
+        
+        cube = self.create_cube(car_mass)
+        self.setup_car_dynamics(car)
+
+        return car, cube
+
+    def load_car(self):
+        car_scale = self.cfg['car']['scale']
+        car = p.loadURDF(self.cfg['car']['urdf'], self.cfg['car']['position'], globalScaling=car_scale)
+        return car
+
+    def create_cube(self, car_mass):
+        car_scale = self.cfg['car']['scale']
         cube_size = self.cfg['cube']['size_factor'] * car_scale
         cube_mass = car_mass * self.cfg['cube']['mass_ratio']
 
@@ -101,11 +110,10 @@ class CarJumpEnv:
             baseVisualShapeIndex=cube_vis,
             basePosition=self.cfg['cube']['position']
         )
+        return cube
 
-        # Wheels = joints 2 and 3 for rear drive
-        # wheel_joints = [2, 3 ,5, 7]
-
-        for j in self.cfg['car']['rear_whls']:
+    def setup_car_dynamics(self, car):
+        for j in self.cfg['car']['wheel_joints']:
             p.changeDynamics(car, j, 
                             lateralFriction=self.cfg['car']['lateral_friction'], 
                             spinningFriction=self.cfg['car']['spinning_friction'], 
@@ -119,7 +127,7 @@ class CarJumpEnv:
                             rollingFriction=0.0
                             )
             
-        return car, cube
+        return
 
 
 
