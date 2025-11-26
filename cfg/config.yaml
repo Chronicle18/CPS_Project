@@ -59,16 +59,22 @@ speed_profiles:
 cube:
   mass_ratio: 0.3 # cube_mass = car_mass * mass_ratio
   size_factor: 0.0375 # x times car scale
-  position: [0.25, 0, 0.2]
+  position: [0.45, 0, 0.2]  # Shifted forward by 0.2m from 0.25
   color: [0, 1, 0, 1]
-  local_initial_pos: [0.25, 0, 0.2]
-  limit_x: 0.25 # for PID pitch control
+  local_initial_pos: [0.45, 0, 0.2]  # Start at shifted center
+  limit_x_forward: 0.45  # Forward limit from shifted center
+  limit_x_backward: 0.25  # Backward limit from shifted center
+  limit_y: 0.15  # Lateral limit (left/right)
 
 pid:
   kp: 6.0
   ki: 0.0
   kd: 0.6
   target_pitch: 0.0
+  kp_roll: 4.0  # Roll control (Y-axis)
+  ki_roll: 0.0
+  kd_roll: 0.4
+  target_roll: 0.0
 
 world:
   plane_urdf: "plane.urdf"

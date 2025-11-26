@@ -5,8 +5,9 @@ import argparse
 import numpy as np
 import os
 from tqdm import tqdm
+from collections import deque
 from utils.videowriter import VideoWriter
-from modules.controllers import PID
+from modules.controllers import PID2D
 from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
@@ -52,12 +53,22 @@ def run_sim(cfg):
     main_cam = env.main_cam
     pov_cam = env.pov_cam
 
-    # Move cube initially at center
+    # Move cube initially at shifted center (0.2m forward)
+    cube_center_x = cfg['cube']['local_initial_pos'][0]
+    cube_center_y = cfg['cube']['local_initial_pos'][1]
     current_local_cube_pos = cfg['cube']['local_initial_pos']
     time_step = 0
 
-    # initialize controller
-    pid = PID(cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'])
+    # initialize 2D controller for pitch and roll
+    pid_2d = PID2D(
+        cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'],
+        cfg['pid']['kp_roll'], cfg['pid']['ki_roll'], cfg['pid']['kd_roll']
+    )
+    
+    # History tracking for smoothed decision making (last 5 steps)
+    cube_shift_history = deque(maxlen=5)
+    for _ in range(5):
+        cube_shift_history.append([0.0, 0.0])  # [x_shift, y_shift]
 
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
@@ -100,6 +111,12 @@ def run_sim(cfg):
     rear_wheel_joints = cfg['car']['rear_whls']
     front_wheel_joints = cfg['car']['front_whls']
     steering_joints = [4,6]
+    
+    # Get car dimensions for wheel positions (for landing angle calculation)
+    aabb_min, aabb_max = p.getAABB(car)
+    car_length = aabb_max[0] - aabb_min[0]
+    wheelbase = car_length * 0.7  # Approximate wheelbase
+    print(f"Car length: {car_length:.3f}m, Estimated wheelbase: {wheelbase:.3f}m")
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
@@ -114,7 +131,7 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             car_pos, car_orn = p.getBasePositionAndOrientation(car)
             car_vel, car_ang_vel = p.getBaseVelocity(car)
-            _, pitch, _ = p.getEulerFromQuaternion(car_orn)
+            roll, pitch, yaw = p.getEulerFromQuaternion(car_orn)
 
             # Calculate current speed
             current_speed = np.linalg.norm(car_vel)
@@ -234,15 +251,69 @@ def run_sim(cfg):
                 pbar.n = time_step
 
             # ----------------------------------------------------------
-            # MID-AIR CONTROL
+            # MID-AIR CONTROL - 2D Cube Movement with Decision Smoothing
             # ----------------------------------------------------------
-            pitch_error = cfg['pid']['target_pitch'] - pitch
-            cube_shift = pid.step(pitch_error)
-
-            # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
-
-            current_local_cube_pos = [cube_shift, 0, 0.2]
+            if is_airborne:
+                # Calculate pitch and roll errors
+                pitch_error = cfg['pid']['target_pitch'] - pitch
+                roll_error = cfg['pid']['target_roll'] - roll
+                
+                # Get raw PID outputs
+                raw_x_shift, raw_y_shift = pid_2d.step(pitch_error, roll_error)
+                
+                # Add to history for smoothing
+                cube_shift_history.append([raw_x_shift, raw_y_shift])
+                
+                # Smoothed decision: average of last 5 steps to minimize jitter
+                history_array = np.array(cube_shift_history)
+                smoothed_x_shift = np.mean(history_array[:, 0])
+                smoothed_y_shift = np.mean(history_array[:, 1])
+                
+                # Apply limits (shifted center: x=0.45, y=0)
+                limit_x_forward = cfg['cube']['limit_x_forward']
+                limit_x_backward = cfg['cube']['limit_x_backward']
+                limit_y = cfg['cube']['limit_y']
+                
+                # X-axis: Range from (center - backward) to (center + forward)
+                # Center is at 0.45, so range is [0.20, 0.90]
+                cube_shift_x = np.clip(smoothed_x_shift, -limit_x_backward, limit_x_forward)
+                
+                # Y-axis: Range from -0.15 to +0.15 (symmetric around center)
+                cube_shift_y = np.clip(smoothed_y_shift, -limit_y, limit_y)
+                
+                # LANDING ANGLE PREDICTION: Adjust for 4-wheel touchdown
+                # Predict wheel heights based on current pitch and angular velocity
+                # Target: rear and front wheels at same height when landing
+                
+                # Get wheel heights in world frame
+                front_wheel_states = [p.getLinkState(car, j) for j in front_wheel_joints]
+                rear_wheel_states = [p.getLinkState(car, j) for j in rear_wheel_joints]
+                
+                front_wheel_avg_z = np.mean([state[0][2] for state in front_wheel_states])
+                rear_wheel_avg_z = np.mean([state[0][2] for state in rear_wheel_states])
+                
+                wheel_height_diff = front_wheel_avg_z - rear_wheel_avg_z
+                
+                # Predict landing pitch: if front is higher, we need nose-down correction
+                # Angular velocity also indicates rotation direction
+                pitch_velocity = car_ang_vel[1]  # Pitch rate (rad/s)
+                
+                # Predictive correction for level landing
+                # If front wheels are higher OR pitching up, shift cube forward to nose down
+                # If rear wheels are higher OR pitching down, shift cube backward to nose up
+                LANDING_PREDICTION_GAIN = 2.0
+                landing_correction_x = -wheel_height_diff * LANDING_PREDICTION_GAIN
+                landing_correction_x -= pitch_velocity * 0.5  # Dampen pitch rotation
+                
+                # Apply landing correction to X-shift
+                cube_shift_x += landing_correction_x
+                cube_shift_x = np.clip(cube_shift_x, -limit_x_backward, limit_x_forward)
+                
+                # Final cube position in local frame (relative to shifted center)
+                current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
+            else:
+                # On ground: Keep cube at shifted center
+                current_local_cube_pos = [cube_center_x, cube_center_y, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
