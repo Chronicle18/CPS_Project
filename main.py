@@ -328,17 +328,8 @@ def run_sim(cfg):
                 # Final cube position in local frame (relative to shifted center)
                 current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
             else:
-                # On ground: Move cube based on time_step for initial testing
-                if time_step <= 100:
-                    cube_shift_x = limit_x_forward  # extreme front
-                    cube_shift_y = 0
-                elif time_step <= 200:
-                    cube_shift_x = limit_x_forward * 0.5  # to front
-                    cube_shift_y = 0
-                else:
-                    cube_shift_x = 0  # center
-                    cube_shift_y = 0
-                current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
+                # On ground: Keep cube at shifted center
+                current_local_cube_pos = [cube_center_x, cube_center_y, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
