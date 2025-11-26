@@ -89,6 +89,11 @@ def run_sim(cfg):
     pre_landing_metrics = []
     landing_metrics = None
     display_landing_report_frames = 0  # Counter for displaying landing report
+    
+    # Recommendations tracking (to prevent blinking)
+    flight_recommendations = None
+    last_recommendations_update = 0
+    recommendations_update_interval = 30  # Update every 30 steps (~0.125 seconds at 240 Hz)
 
     # Get speed profile settings
     selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
@@ -371,13 +376,27 @@ def run_sim(cfg):
                 'is_airborne': is_airborne
             }
             
+            # Generate recommendations during flight (update every 30 steps to reduce overhead and prevent blinking)
+            if is_airborne:
+                if time_step - last_recommendations_update >= recommendations_update_interval:
+                    # Evaluate current metrics to generate recommendations
+                    current_metrics = evaluator.evaluate_landing(car, plane, current_time)
+                    flight_recommendations = evaluator._generate_recommendations(current_metrics)
+                    last_recommendations_update = time_step
+            else:
+                # Clear recommendations when not airborne
+                flight_recommendations = None
+                last_recommendations_update = 0
+            
             # Pass landing metrics if we're displaying the report
             current_landing_metrics = None
             if display_landing_report_frames > 0 and landing_metrics is not None:
                 current_landing_metrics = landing_metrics
                 display_landing_report_frames -= 1
             
-            vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data, landing_metrics=current_landing_metrics)
+            vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data, 
+                                 landing_metrics=current_landing_metrics, 
+                                 recommendations=flight_recommendations)
     
     p.disconnect()
     vid_writer.release()
