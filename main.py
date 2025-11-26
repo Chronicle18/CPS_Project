@@ -139,6 +139,10 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # CHECK AIRBORNE STATUS (with safety check for None)
             # ----------------------------------------------------------
+            # Check if touching ramp (any part of car)
+            contacts_ramp = p.getContactPoints(bodyA=car, bodyB=ramp)
+            is_touching_ramp = len(contacts_ramp) > 0
+
             wheel_contacts = []
             for wheel_joint in [2, 3, 5, 7]:  # all wheels
                 contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
@@ -146,7 +150,8 @@ def run_sim(cfg):
                     wheel_contacts.extend(contacts)
             
             was_airborne = is_airborne
-            is_airborne = len(wheel_contacts) == 0
+            # Airborne only if NO wheel contacts AND NOT touching ramp
+            is_airborne = (len(wheel_contacts) == 0) and (not is_touching_ramp)
             
             # Track airtime
             if is_airborne and not was_airborne:
@@ -255,8 +260,11 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             if is_airborne:
                 # Calculate pitch and roll errors
-                pitch_error = cfg['pid']['target_pitch'] - pitch
-                roll_error = cfg['pid']['target_roll'] - roll
+                # Physics: When pitch is POSITIVE (nose up), shift cube FORWARD (positive X)
+                # to create torque that brings nose down.
+                # When pitch is NEGATIVE (nose down), shift cube BACKWARD (negative X)
+                pitch_error = pitch - cfg['pid']['target_pitch']  # Inverted error for correct direction
+                roll_error = roll - cfg['pid']['target_roll']     # Inverted error for correct direction
                 
                 # Get raw PID outputs
                 raw_x_shift, raw_y_shift = pid_2d.step(pitch_error, roll_error)
@@ -299,11 +307,11 @@ def run_sim(cfg):
                 pitch_velocity = car_ang_vel[1]  # Pitch rate (rad/s)
                 
                 # Predictive correction for level landing
-                # If front wheels are higher OR pitching up, shift cube forward to nose down
-                # If rear wheels are higher OR pitching down, shift cube backward to nose up
+                # If front wheels are higher, shift cube FORWARD (positive) to bring nose down
+                # If rear wheels are higher, shift cube BACKWARD (negative) to bring nose up
                 LANDING_PREDICTION_GAIN = 2.0
-                landing_correction_x = -wheel_height_diff * LANDING_PREDICTION_GAIN
-                landing_correction_x -= pitch_velocity * 0.5  # Dampen pitch rotation
+                landing_correction_x = wheel_height_diff * LANDING_PREDICTION_GAIN
+                landing_correction_x += pitch_velocity * 0.5  # If pitching up, shift forward
                 
                 # Apply landing correction to X-shift
                 cube_shift_x += landing_correction_x
