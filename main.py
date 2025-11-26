@@ -7,7 +7,7 @@ import os
 from tqdm import tqdm
 from collections import deque
 from utils.videowriter import VideoWriter
-from modules.controllers import PID2D
+from modules.controllers import PID2D, PID
 from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
@@ -65,10 +65,18 @@ def run_sim(cfg):
         cfg['pid']['kp_roll'], cfg['pid']['ki_roll'], cfg['pid']['kd_roll']
     )
     
+    # Initialize yaw PID for straight line control
+    yaw_pid = PID(kp=2.0, ki=0.0, kd=0.1)  # Tune these values as needed
+    
+    # Cube movement limits
+    limit_x_forward = cfg['cube']['limit_x_forward']
+    limit_x_backward = cfg['cube']['limit_x_backward']
+    limit_y = cfg['cube']['limit_y']
+    
     # History tracking for smoothed decision making (last 5 steps)
-    cube_shift_history = deque(maxlen=5)
-    for _ in range(5):
-        cube_shift_history.append([0.0, 0.0])  # [x_shift, y_shift]
+    # cube_shift_history = deque(maxlen=5)
+    # for _ in range(5):
+    #     cube_shift_history.append([0.0, 0.0])  # [x_shift, y_shift]
 
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
@@ -171,14 +179,17 @@ def run_sim(cfg):
                 current_airtime = 0.0
 
             # ----------------------------------------------------------
-            # KEEP FRONT WHEELS STRAIGHT
+            # STEERING CONTROL - Keep car on straight line
             # ----------------------------------------------------------
+            yaw_error = 0 - yaw  # Target yaw is 0 (straight)
+            steering_angle = yaw_pid.step(yaw_error)
+            
             for j in steering_joints:
                 p.setJointMotorControl2(
                     bodyUniqueId=car,
                     jointIndex=j,
                     controlMode=p.POSITION_CONTROL,
-                    targetPosition=0,  # Straight ahead
+                    targetPosition=steering_angle,  # Adjust steering to correct yaw
                     force=1000
                 )
 
@@ -270,24 +281,21 @@ def run_sim(cfg):
                 raw_x_shift, raw_y_shift = pid_2d.step(pitch_error, roll_error)
                 
                 # Add to history for smoothing
-                cube_shift_history.append([raw_x_shift, raw_y_shift])
+                # cube_shift_history.append([raw_x_shift, raw_y_shift])
                 
                 # Smoothed decision: average of last 5 steps to minimize jitter
-                history_array = np.array(cube_shift_history)
-                smoothed_x_shift = np.mean(history_array[:, 0])
-                smoothed_y_shift = np.mean(history_array[:, 1])
+                # history_array = np.array(cube_shift_history)
+                # smoothed_x_shift = np.mean(history_array[:, 0])
+                # smoothed_y_shift = np.mean(history_array[:, 1])
                 
                 # Apply limits (shifted center: x=0.45, y=0)
-                limit_x_forward = cfg['cube']['limit_x_forward']
-                limit_x_backward = cfg['cube']['limit_x_backward']
-                limit_y = cfg['cube']['limit_y']
                 
                 # X-axis: Range from (center - backward) to (center + forward)
                 # Center is at 0.45, so range is [0.20, 0.90]
-                cube_shift_x = np.clip(smoothed_x_shift, -limit_x_backward, limit_x_forward)
+                cube_shift_x = np.clip(raw_x_shift, -limit_x_backward, limit_x_forward)
                 
                 # Y-axis: Range from -0.15 to +0.15 (symmetric around center)
-                cube_shift_y = np.clip(smoothed_y_shift, -limit_y, limit_y)
+                cube_shift_y = 0  # Only x direction for initial testing
                 
                 # LANDING ANGLE PREDICTION: Adjust for 4-wheel touchdown
                 # Predict wheel heights based on current pitch and angular velocity
@@ -320,8 +328,17 @@ def run_sim(cfg):
                 # Final cube position in local frame (relative to shifted center)
                 current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
             else:
-                # On ground: Keep cube at shifted center
-                current_local_cube_pos = [cube_center_x, cube_center_y, 0.2]
+                # On ground: Move cube based on time_step for initial testing
+                if time_step <= 100:
+                    cube_shift_x = limit_x_forward  # extreme front
+                    cube_shift_y = 0
+                elif time_step <= 200:
+                    cube_shift_x = limit_x_forward * 0.5  # to front
+                    cube_shift_y = 0
+                else:
+                    cube_shift_x = 0  # center
+                    cube_shift_y = 0
+                current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
