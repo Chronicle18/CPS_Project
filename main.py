@@ -11,6 +11,7 @@ from modules.custom_envs import CarJumpEnv
 from modules.camera import Camera
 import utils.geom_utils as geom
 import utils.monitor_info as monitor
+from utils.landing_evaluation import LandingEvaluator, print_landing_report
 
 parser = argparse.ArgumentParser(description="Car Jump Simulation with Internal Mass Control")
 parser.add_argument('--config', type=str, default='cfg/config.yaml', help='Path to configuration YAML file')
@@ -62,6 +63,11 @@ def run_sim(cfg):
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
     vid_writer = VideoWriter(video_path, frame_size=(cfg['camera']['width'], cfg['camera']['height']), fps=cfg['logging']['video_fps'])
+
+    # initialize landing evaluator
+    evaluator = LandingEvaluator(cfg.get('landing_evaluation', {}))
+    pre_landing_metrics = []
+    landing_metrics = None
 
     # Get speed profile settings
     selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
@@ -226,10 +232,31 @@ def run_sim(cfg):
                     )
 
             # ----------------------------------------------------------
+            # UPDATE LANDING EVALUATOR HISTORY
+            # ----------------------------------------------------------
+            evaluator.update_history(car, current_time)
+            
+            # Capture pre-landing metrics (during flight)
+            if is_airborne and len(pre_landing_metrics) < 50:
+                metrics = evaluator.evaluate_landing(car, plane, current_time)
+                pre_landing_metrics.append(metrics)
+
+            # ----------------------------------------------------------
             # CHECK LANDING
             # ----------------------------------------------------------
             if monitor.hasLanded(car, plane, ramp, TASK_STATES):
                 print("Landed at step:", time_step)
+                
+                # Evaluate landing metrics
+                landing_metrics = evaluator.evaluate_landing(car, plane, current_time)
+                evaluation = evaluator.evaluate_landing_sequence(
+                    car, plane, current_time, pre_landing_metrics
+                )
+                
+                # Print evaluation report
+                print_landing_report(landing_metrics, evaluator)
+                print(f"\nOverall Landing Performance Score: {evaluation['improvement_score']:.1f}/100")
+                
                 time_step = MAX_STEPS - 200
                 pbar.n = time_step
 

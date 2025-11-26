@@ -87,3 +87,9 @@ logging:
   video_file: "car_jump.mp4"
   video_fps: 30
   debug_text: true
+
+landing_evaluation:
+  uprightness_threshold: 30 # Degrees (0 = perfectly upright, 90 = sideways)
+  velocity_threshold: 5.0 # m/s
+  vertical_velocity_threshold: 2.0 # m/s
+  stability_threshold: 50 # Score out of 100
