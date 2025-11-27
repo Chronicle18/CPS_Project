@@ -31,7 +31,7 @@ car:
   scale: 2.0
   mass: 500
   position: [0, 0, 0.05]
-  speed_profile: "SLOW" # Options: SLOW, NORMAL, FAST, VERY_FAST
+  speed_profile: "VERY_FAST" # Options: SLOW, NORMAL, FAST, VERY_FAST
   front_whls: [5, 7]
   rear_whls: [2, 3]
   lateral_friction: 2.0
@@ -45,7 +45,7 @@ speed_profiles:
     description: "Slow and steady"
   NORMAL:
     target_velocity: 45 # 108 kmph
-    forward_force: 7726.6975
+    forward_force: 77260.6975
     description: "Standard speed"
   FAST:
     target_velocity: 33.33 # 120 kmph
@@ -57,7 +57,7 @@ speed_profiles:
     description: "Maximum speed"
 
 cube:
-  mass_ratio: 0.3 # cube_mass = car_mass * mass_ratio
+  mass_ratio: 0.2 # cube_mass = car_mass * mass_ratio
   size_factor: 0.0375 # x times car scale
   position: [0.45, 0, 0.2]  # Shifted forward by 0.2m from 0.25
   color: [0, 1, 0, 1]

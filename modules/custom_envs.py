@@ -115,8 +115,8 @@ class CarJumpEnv:
         for j in self.cfg['car']['front_whls']:
             p.changeDynamics(car, j, 
                             lateralFriction=self.cfg['car']['lateral_friction'], 
-                            spinningFriction=0.0, 
-                            rollingFriction=0.0
+                            spinningFriction=self.cfg['car']['spinning_friction'], 
+                            rollingFriction=0.02
                             )
             
         return car, cube

@@ -87,12 +87,12 @@ class MonitorInfo:
     def isWheelOnGround(self, car, plane):
         pass
     
-    def check_airborne_status(self, car, plane, curr_timestep):
+    def check_airborne_status(self, car, plane, ramp, curr_timestep):
         current_time = curr_timestep * self.cfg['simulation']['time_step']
 
         wheel_contacts = []
         for wheel_joint in (self.cfg['car']['front_whls'] + self.cfg['car']['rear_whls']): 
-            contacts = p.getContactPoints(car, plane, linkIndexA=wheel_joint)
+            contacts = p.getContactPoints(car, plane, linkIndexA=wheel_joint) + p.getContactPoints(car, ramp, linkIndexA=wheel_joint) 
             if contacts is not None:  # Safety check
                 wheel_contacts.extend(contacts)
 
@@ -141,7 +141,7 @@ class MonitorInfo:
             print("All wheels did not land")
             wheel_touch_score = 0
         
-        print(f"Wheel touch score: {wheel_touch_score*100:.2f}")
+        print(f"Wheel touch score: {wheel_touch_score*100:.2f}%   ... last wheel landed {delta_t} steps after first wheel.")
 
 
         # normal forces on wheels
