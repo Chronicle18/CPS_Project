@@ -246,7 +246,7 @@ def run_sim(cfg):
                     monitor.landing_pitch, monitor.landing_roll = pitch, roll
 
             # ----------------------------------------------------------
-            # MID-AIR CONTROL - 2D Cube Movement with Decision Smoothing
+            # MID-AIR CONTROL - 2D Cube Movement with Aggressive Response
             # ----------------------------------------------------------
             if monitor.is_airborne:
                 # Calculate pitch and roll errors
@@ -256,7 +256,7 @@ def run_sim(cfg):
                 pitch_error = pitch - cfg['pid']['target_pitch']  # Inverted error for correct direction
                 roll_error = roll - cfg['pid']['target_roll']     # Inverted error for correct direction
                 
-                # Get raw PID outputs
+                # Get raw PID outputs for 2D movement
                 raw_x_shift, raw_y_shift = pid_2d.step(pitch_error, roll_error)
                 
                 # Add to history for smoothing
@@ -267,44 +267,69 @@ def run_sim(cfg):
                 # smoothed_x_shift = np.mean(history_array[:, 0])
                 # smoothed_y_shift = np.mean(history_array[:, 1])
                 
-                # Apply limits (shifted center: x=0.45, y=0)
-                
+                # Apply limits with aggressive response to forward tilt
                 # X-axis: Range from (center - backward) to (center + forward)
                 # Center is at 0.45, so range is [0.20, 0.90]
                 cube_shift_x = np.clip(raw_x_shift, -limit_x_backward, limit_x_forward)
                 
-                # Y-axis: Range from -0.15 to +0.15 (symmetric around center)
-                cube_shift_y = 0  # Only x direction for initial testing
+                # Y-axis: Active 2D control - apply roll correction
+                # Range from -limit_y to +limit_y (symmetric around center)
+                cube_shift_y = np.clip(raw_y_shift, -limit_y, limit_y)
                 
-                # LANDING ANGLE PREDICTION: Adjust for 4-wheel touchdown
+                # LANDING ANGLE PREDICTION: Adjust for 4-wheel touchdown with AGGRESSIVE response
                 # Predict wheel heights based on current pitch and angular velocity
-                # Target: rear and front wheels at same height when landing
+                # Target: all wheels at same height when landing
                 
-                # Get wheel heights in world frame
+                # Get wheel heights in world frame for PITCH control (front vs rear)
                 front_wheel_states = [p.getLinkState(car, j) for j in front_wheel_joints]
                 rear_wheel_states = [p.getLinkState(car, j) for j in rear_wheel_joints]
                 
                 front_wheel_avg_z = np.mean([state[0][2] for state in front_wheel_states])
                 rear_wheel_avg_z = np.mean([state[0][2] for state in rear_wheel_states])
                 
-                wheel_height_diff = front_wheel_avg_z - rear_wheel_avg_z
+                wheel_height_diff_pitch = front_wheel_avg_z - rear_wheel_avg_z
                 
-                # Predict landing pitch: if front is higher, we need nose-down correction
-                # Angular velocity also indicates rotation direction
+                # Get wheel heights for ROLL control (left vs right)
+                # Assume front_wheel_joints[0] and rear_wheel_joints[0] are left side
+                # Assume front_wheel_joints[1] and rear_wheel_joints[1] are right side
+                left_wheel_avg_z = (front_wheel_states[0][0][2] + rear_wheel_states[0][0][2]) / 2
+                right_wheel_avg_z = (front_wheel_states[1][0][2] + rear_wheel_states[1][0][2]) / 2
+                
+                wheel_height_diff_roll = left_wheel_avg_z - right_wheel_avg_z
+                
+                # Angular velocities for predictive control
                 pitch_velocity = curr_ang_vel[1]  # Pitch rate (rad/s)
+                roll_velocity = curr_ang_vel[0]   # Roll rate (rad/s)
                 
-                # Predictive correction for level landing
+                # AGGRESSIVE predictive correction for level landing
+                # Higher gains for faster response to height differences
+                # PITCH CONTROL (X-axis):
                 # If front wheels are higher, shift cube FORWARD (positive) to bring nose down
                 # If rear wheels are higher, shift cube BACKWARD (negative) to bring nose up
-                LANDING_PREDICTION_GAIN = 2.0
-                landing_correction_x = wheel_height_diff * LANDING_PREDICTION_GAIN
-                landing_correction_x += pitch_velocity * 0.5  # If pitching up, shift forward
+                LANDING_PREDICTION_GAIN_PITCH = 6.0  # Increased for aggressive pitch response
+                PITCH_VELOCITY_GAIN = 1.5  # Increased for faster angular correction
                 
-                # Apply landing correction to X-shift
+                landing_correction_x = wheel_height_diff_pitch * LANDING_PREDICTION_GAIN_PITCH
+                landing_correction_x += pitch_velocity * PITCH_VELOCITY_GAIN
+                
+                # ROLL CONTROL (Y-axis):
+                # If left wheels are higher, shift cube LEFT (negative Y) to bring left side down
+                # If right wheels are higher, shift cube RIGHT (positive Y) to bring right side down
+                LANDING_PREDICTION_GAIN_ROLL = 6.0  # Aggressive roll response
+                ROLL_VELOCITY_GAIN = 1.5  # Fast roll angular correction
+                
+                landing_correction_y = -wheel_height_diff_roll * LANDING_PREDICTION_GAIN_ROLL  # Negative for correct physics
+                landing_correction_y += -roll_velocity * ROLL_VELOCITY_GAIN
+                
+                # Apply landing corrections with aggressive response
                 cube_shift_x += landing_correction_x
                 cube_shift_x = np.clip(cube_shift_x, -limit_x_backward, limit_x_forward)
                 
+                cube_shift_y += landing_correction_y
+                cube_shift_y = np.clip(cube_shift_y, -limit_y, limit_y)
+                
                 # Final cube position in local frame (relative to shifted center)
+                # Now includes aggressive 2D control for both pitch and roll
                 current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
             else:
                 # On ground: Keep cube at shifted center
