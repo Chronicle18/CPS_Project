@@ -6,11 +6,10 @@ import numpy as np
 import os
 from tqdm import tqdm
 from utils.videowriter import VideoWriter
-from modules.controllers import PID
+from modules.controllers import PID2D, PID
 from modules.custom_envs import CarJumpEnv
-from modules.camera import Camera
 import utils.geom_utils as geom
-import utils.monitor_info as monitor
+from utils.monitor_info import MonitorInfo
 
 parser = argparse.ArgumentParser(description="Car Jump Simulation with Internal Mass Control")
 parser.add_argument('--config', type=str, default='cfg/config.yaml', help='Path to configuration YAML file')
@@ -52,16 +51,35 @@ def run_sim(cfg):
     main_cam = env.main_cam
     pov_cam = env.pov_cam
 
-    # Move cube initially at center
+    # Move cube initially at shifted center (0.2m forward)
+    cube_center_x = cfg['cube']['local_initial_pos'][0]
+    cube_center_y = cfg['cube']['local_initial_pos'][1]
     current_local_cube_pos = cfg['cube']['local_initial_pos']
     time_step = 0
 
-    # initialize controller
-    pid = PID(cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'])
+    # initialize 2D controller for pitch and roll
+    pid_2d = PID2D(
+        cfg['pid']['kp'], cfg['pid']['ki'], cfg['pid']['kd'],
+        cfg['pid']['kp_roll'], cfg['pid']['ki_roll'], cfg['pid']['kd_roll']
+    )
+    
+    # Initialize yaw PID for straight line control
+    yaw_pid = PID(kp=2.0, ki=0.0, kd=0.1)  # Tune these values as needed
+    
+    # Cube movement limits
+    limit_x_forward = cfg['cube']['limit_x_forward']
+    limit_x_backward = cfg['cube']['limit_x_backward']
+    limit_y = cfg['cube']['limit_y']
+    
+    # History tracking for smoothed decision making (last 5 steps)
+    # cube_shift_history = deque(maxlen=5)
+    # for _ in range(5):
+    #     cube_shift_history.append([0.0, 0.0])  # [x_shift, y_shift]
 
     # logging setup
     video_path = os.path.join(cfg['logging']['save_dir'], cfg['logging']['video_file'])
     vid_writer = VideoWriter(video_path, frame_size=(cfg['camera']['width'], cfg['camera']['height']), fps=cfg['logging']['video_fps'])
+    monitor = MonitorInfo(cfg)
 
     # Get speed profile settings
     selected_profile = cfg['car'].get('speed_profile', 'NORMAL')
@@ -92,18 +110,21 @@ def run_sim(cfg):
     acceleration_active = False
     acceleration_start_timestamp = None
     
-    # Airtime tracking
-    airborne_start_time = None
-    total_airtime = 0.0
-    is_airborne = False
-    
     rear_wheel_joints = cfg['car']['rear_whls']
     front_wheel_joints = cfg['car']['front_whls']
     steering_joints = [4,6]
+    
+    # Get car dimensions for wheel positions (for landing angle calculation)
+    aabb_min, aabb_max = p.getAABB(car)
+    car_length = aabb_max[0] - aabb_min[0]
+    wheelbase = car_length * 0.7  # Approximate wheelbase
+    print(f"Car length: {car_length:.3f}m, Estimated wheelbase: {wheelbase:.3f}m")
 
     # Simulation loop
     with tqdm(total=MAX_STEPS) as pbar:
-        while time_step < MAX_STEPS:
+        frame_number = 0
+        while frame_number < MAX_STEPS:
+            frame_number += 1
             time_step += 1
             pbar.update(1)
             
@@ -113,66 +134,55 @@ def run_sim(cfg):
             # CAR STATE
             # ----------------------------------------------------------
             car_pos, car_orn = p.getBasePositionAndOrientation(car)
-            car_vel, car_ang_vel = p.getBaseVelocity(car)
-            _, pitch, _ = p.getEulerFromQuaternion(car_orn)
-
-            # Calculate current speed
-            current_speed = np.linalg.norm(car_vel)
+            roll, pitch, yaw = p.getEulerFromQuaternion(car_orn)
+            current_speed, curr_ang_vel = monitor.get_velocity(car)
             
             # ----------------------------------------------------------
             # CHECK AIRBORNE STATUS (with safety check for None)
             # ----------------------------------------------------------
-            wheel_contacts = []
-            for wheel_joint in [2, 3, 5, 7]:  # all wheels
-                contacts = p.getContactPoints(bodyA=car, linkIndexA=wheel_joint)
-                if contacts is not None:  # Safety check
-                    wheel_contacts.extend(contacts)
-            
-            was_airborne = is_airborne
-            is_airborne = len(wheel_contacts) == 0
-            
-            # Track airtime
-            if is_airborne and not was_airborne:
-                airborne_start_time = current_time
-                print(f"[{current_time:.2f}s] Airborne!")
-            elif not is_airborne and was_airborne:
-                if airborne_start_time is not None:
-                    flight_duration = current_time - airborne_start_time
-                    total_airtime += flight_duration
-                    print(f"[{current_time:.2f}s] Landed! Flight: {flight_duration:.2f}s")
-                    airborne_start_time = None
-            
-            # Calculate current airtime
-            if is_airborne and airborne_start_time is not None:
-                current_airtime = current_time - airborne_start_time
-            else:
-                current_airtime = 0.0
+            # Check if touching ramp (any part of car)
+            current_airtime = monitor.check_airborne_status(car, plane, ramp, time_step)
 
             # ----------------------------------------------------------
-            # KEEP FRONT WHEELS STRAIGHT
+            # STEERING CONTROL - Keep car on straight line
             # ----------------------------------------------------------
+            yaw_error = 0 - yaw  # Target yaw is 0 (straight)
+            steering_angle = yaw_pid.step(yaw_error)
+            
             for j in steering_joints:
                 p.setJointMotorControl2(
                     bodyUniqueId=car,
                     jointIndex=j,
                     controlMode=p.POSITION_CONTROL,
-                    targetPosition=0,  # Straight ahead
+                    targetPosition=steering_angle,  # Adjust steering to correct yaw
                     force=1000
                 )
+            if yaw_error != 0:
+                # Apply motor control to rear wheels
+                for j in front_wheel_joints:
+                    p.setJointMotorControl2(
+                        bodyUniqueId=car,
+                        jointIndex=j,
+                        controlMode=p.VELOCITY_CONTROL,
+                        targetVelocity=target_velocity,
+                        force=forward_force
+                    )
+
+            
 
             # ----------------------------------------------------------
             # ACCELERATION LOGIC
             # ----------------------------------------------------------
             # Start acceleration after delay
-            if current_time >= ACCELERATION_START_TIME and not acceleration_active and not is_airborne:
+            if current_time >= ACCELERATION_START_TIME and not acceleration_active and not monitor.is_airborne:
                 acceleration_active = True
                 acceleration_start_timestamp = current_time
                 print(f"[{current_time:.2f}s] Acceleration started!")
             
             # Stop acceleration when airborne
-            if is_airborne and acceleration_active:
-                acceleration_active = False
-                print(f"[{current_time:.2f}s] Airborne - stopping acceleration")
+            # if monitor.is_airborne and acceleration_active:
+            #     acceleration_active = False
+            #     print(f"[{current_time:.2f}s] Airborne - stopping acceleration")
 
             # ----------------------------------------------------------
             # DRIVE FORWARD WITH GRADUAL ACCELERATION
@@ -228,21 +238,77 @@ def run_sim(cfg):
             # ----------------------------------------------------------
             # CHECK LANDING
             # ----------------------------------------------------------
-            if monitor.hasLanded(car, plane, ramp, TASK_STATES):
+            if monitor.hasLanded(car, plane, ramp, time_step):
                 print("Landed at step:", time_step)
-                time_step = MAX_STEPS - 200
-                pbar.n = time_step
+                frame_number = MAX_STEPS - 200
+                pbar.n = frame_number
+                if not monitor.landing_roll and not monitor.landing_pitch:
+                    monitor.landing_pitch, monitor.landing_roll = pitch, roll
 
             # ----------------------------------------------------------
-            # MID-AIR CONTROL
+            # MID-AIR CONTROL - 2D Cube Movement with Decision Smoothing
             # ----------------------------------------------------------
-            pitch_error = cfg['pid']['target_pitch'] - pitch
-            cube_shift = pid.step(pitch_error)
-
-            # Limit shift
-            cube_shift = np.clip(cube_shift, -cfg['cube']['limit_x'], cfg['cube']['limit_x'])
-
-            current_local_cube_pos = [cube_shift, 0, 0.2]
+            if monitor.is_airborne:
+                # Calculate pitch and roll errors
+                # Physics: When pitch is POSITIVE (nose up), shift cube FORWARD (positive X)
+                # to create torque that brings nose down.
+                # When pitch is NEGATIVE (nose down), shift cube BACKWARD (negative X)
+                pitch_error = pitch - cfg['pid']['target_pitch']  # Inverted error for correct direction
+                roll_error = roll - cfg['pid']['target_roll']     # Inverted error for correct direction
+                
+                # Get raw PID outputs
+                raw_x_shift, raw_y_shift = pid_2d.step(pitch_error, roll_error)
+                
+                # Add to history for smoothing
+                # cube_shift_history.append([raw_x_shift, raw_y_shift])
+                
+                # Smoothed decision: average of last 5 steps to minimize jitter
+                # history_array = np.array(cube_shift_history)
+                # smoothed_x_shift = np.mean(history_array[:, 0])
+                # smoothed_y_shift = np.mean(history_array[:, 1])
+                
+                # Apply limits (shifted center: x=0.45, y=0)
+                
+                # X-axis: Range from (center - backward) to (center + forward)
+                # Center is at 0.45, so range is [0.20, 0.90]
+                cube_shift_x = np.clip(raw_x_shift, -limit_x_backward, limit_x_forward)
+                
+                # Y-axis: Range from -0.15 to +0.15 (symmetric around center)
+                cube_shift_y = 0  # Only x direction for initial testing
+                
+                # LANDING ANGLE PREDICTION: Adjust for 4-wheel touchdown
+                # Predict wheel heights based on current pitch and angular velocity
+                # Target: rear and front wheels at same height when landing
+                
+                # Get wheel heights in world frame
+                front_wheel_states = [p.getLinkState(car, j) for j in front_wheel_joints]
+                rear_wheel_states = [p.getLinkState(car, j) for j in rear_wheel_joints]
+                
+                front_wheel_avg_z = np.mean([state[0][2] for state in front_wheel_states])
+                rear_wheel_avg_z = np.mean([state[0][2] for state in rear_wheel_states])
+                
+                wheel_height_diff = front_wheel_avg_z - rear_wheel_avg_z
+                
+                # Predict landing pitch: if front is higher, we need nose-down correction
+                # Angular velocity also indicates rotation direction
+                pitch_velocity = curr_ang_vel[1]  # Pitch rate (rad/s)
+                
+                # Predictive correction for level landing
+                # If front wheels are higher, shift cube FORWARD (positive) to bring nose down
+                # If rear wheels are higher, shift cube BACKWARD (negative) to bring nose up
+                LANDING_PREDICTION_GAIN = 2.0
+                landing_correction_x = wheel_height_diff * LANDING_PREDICTION_GAIN
+                landing_correction_x += pitch_velocity * 0.5  # If pitching up, shift forward
+                
+                # Apply landing correction to X-shift
+                cube_shift_x += landing_correction_x
+                cube_shift_x = np.clip(cube_shift_x, -limit_x_backward, limit_x_forward)
+                
+                # Final cube position in local frame (relative to shifted center)
+                current_local_cube_pos = [cube_center_x + cube_shift_x, cube_center_y + cube_shift_y, 0.2]
+            else:
+                # On ground: Keep cube at shifted center
+                current_local_cube_pos = [cube_center_x, cube_center_y, 0.2]
 
             # ----------------------------------------------------------
             # UPDATE CUBE POSITION
@@ -266,19 +332,26 @@ def run_sim(cfg):
             rgb = main_cam.get_image()
             
             # Prepare overlay data
+            # target_linear_speed = target_velocity * wheelbase
             overlay_data = {
-                'current_speed': current_speed,
-                'target_speed': target_velocity / 10,  # Convert to m/s if needed
-                'airtime': current_airtime if is_airborne else total_airtime,
-                'is_airborne': is_airborne
+                'timestep': time_step,
+                'current_speed': current_speed * 10,
+                # 'target_speed': target_velocity,  # Convert to m/s if needed
+                'airtime': current_airtime if monitor.is_airborne else monitor.total_airtime,
+                'monitor.is_airborne': monitor.is_airborne
             }
             
             vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data)
+
+    if monitor.task_states['landed']:
+        monitor.evaluate_episode()
+    else:
+        print("Car never landed.")
     
     p.disconnect()
     vid_writer.release()
     
-    print(f"\nTotal airtime: {total_airtime:.2f}s")
+    print(f"\nTotal airtime: {monitor.total_airtime:.2f}s")
     print("Video saved.")
     print("Simulation complete.")
 

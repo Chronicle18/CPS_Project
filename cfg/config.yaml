@@ -2,7 +2,7 @@ simulation:
   mode: "GUI" # HEADLESS or GUI
   time_step: 0.004166 # 1/240
   gravity: [0, 0, -9.8]
-  max_steps: 900
+  max_steps: 1800
   sleep: true # whether to use time.sleep
 
 camera:
@@ -31,10 +31,10 @@ car:
   scale: 2.0
   mass: 500
   position: [0, 0, 0.05]
-  speed_profile: "NORMAL" # Options: SLOW, NORMAL, FAST, VERY_FAST
+  speed_profile: "VERY_FAST" # Options: SLOW, NORMAL, FAST, VERY_FAST
   front_whls: [5, 7]
   rear_whls: [2, 3]
-  lateral_friction: 1.2
+  lateral_friction: 2.0
   spinning_friction: 0.02
   rolling_friction: 0.0
 
@@ -45,7 +45,7 @@ speed_profiles:
     description: "Slow and steady"
   NORMAL:
     target_velocity: 45 # 108 kmph
-    forward_force: 7726.6975
+    forward_force: 77260.6975
     description: "Standard speed"
   FAST:
     target_velocity: 33.33 # 120 kmph
@@ -57,18 +57,24 @@ speed_profiles:
     description: "Maximum speed"
 
 cube:
-  mass_ratio: 0.3 # cube_mass = car_mass * mass_ratio
+  mass_ratio: 0.2 # cube_mass = car_mass * mass_ratio
   size_factor: 0.0375 # x times car scale
-  position: [0.25, 0, 0.2]
+  position: [0.45, 0, 0.2]  # Shifted forward by 0.2m from 0.25
   color: [0, 1, 0, 1]
-  local_initial_pos: [0.25, 0, 0.2]
-  limit_x: 0.25 # for PID pitch control
+  local_initial_pos: [0.45, 0, 0.2]  # Start at shifted center
+  limit_x_forward: 0.35  # Forward limit from shifted center
+  limit_x_backward: 0.5  # Backward limit from shifted center
+  limit_y: 0.15  # Lateral limit (left/right)
 
 pid:
   kp: 6.0
   ki: 0.0
   kd: 0.6
   target_pitch: 0.0
+  kp_roll: 4.0  # Roll control (Y-axis)
+  ki_roll: 0.0
+  kd_roll: 0.4
+  target_roll: 0.0
 
 world:
   plane_urdf: "plane.urdf"
