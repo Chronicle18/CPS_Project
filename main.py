@@ -245,7 +245,7 @@ def run_sim(cfg):
                 print("Landed at step:", time_step)
                 frame_number = MAX_STEPS - 200
                 pbar.n = frame_number
-                if not monitor.landing_roll and not monitor.landing_pitch:
+                if monitor.landing_pitch is None and monitor.landing_roll is None:
                     monitor.landing_pitch, monitor.landing_roll = pitch, roll
 
             # ----------------------------------------------------------
