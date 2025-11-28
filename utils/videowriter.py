@@ -45,16 +45,18 @@ class VideoWriter:
         
         # Prepare text lines
         timestep = data.get('timestep', 0)
-        current_speed = data.get('current_speed', 0)
-        target_speed = data.get('target_speed', 0)
+        current_speed = data.get('current_speed', None)
+        target_speed = data.get('target_speed', None)
         airtime = data.get('airtime', 0)
         is_airborne = data.get('is_airborne', False)
         
         lines = [
             f"Step: {timestep}", 
             f"Speed: {current_speed:.1f} m/s",
-            f"Target: {target_speed:.1f} m/s",
         ]
+
+        if target_speed is not None:
+            lines.append(f"Target: {target_speed:.1f} m/s")
         
         if is_airborne:
             lines.append(f"AIRBORNE: {airtime:.2f}s")

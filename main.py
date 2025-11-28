@@ -338,7 +338,7 @@ def run_sim(cfg):
                 'current_speed': current_speed * 10,
                 # 'target_speed': target_velocity,  # Convert to m/s if needed
                 'airtime': current_airtime if monitor.is_airborne else monitor.total_airtime,
-                'monitor.is_airborne': monitor.is_airborne
+                'is_airborne': monitor.is_airborne
             }
             
             vid_writer.write_frame(rgb, postprocess=True, overlay_data=overlay_data)
