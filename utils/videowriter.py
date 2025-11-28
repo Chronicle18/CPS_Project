@@ -41,16 +41,17 @@ class VideoWriter:
         text_color = (255, 255, 255)  # White
         bg_color = (0, 0, 0)  # Black background
         padding = 5
-        line_height = 30
-        start_y = self.H - 100  # Bottom left, leaving space for 3-4 lines
+        line_height = 25
         
         # Prepare text lines
+        timestep = data.get('timestep', 0)
         current_speed = data.get('current_speed', 0)
         target_speed = data.get('target_speed', 0)
         airtime = data.get('airtime', 0)
         is_airborne = data.get('is_airborne', False)
         
         lines = [
+            f"Step: {timestep}", 
             f"Speed: {current_speed:.1f} m/s",
             f"Target: {target_speed:.1f} m/s",
         ]
@@ -61,6 +62,7 @@ class VideoWriter:
             lines.append(f"Airtime: {airtime:.2f}s")
         
         # Draw background rectangle
+        start_y = self.H - (line_height + padding)*len(lines)  # Bottom left, leaving space for 3-4 lines
         max_text_width = max([cv2.getTextSize(line, font, font_scale, font_thickness)[0][0] 
                               for line in lines])
         bg_height = len(lines) * line_height + padding * 2

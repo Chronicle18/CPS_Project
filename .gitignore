@@ -35,6 +35,7 @@ Thumbs.db
 .ipynb_checkpoints/
 
 # Distribution / packaging
+ignore_scripts/
 dist/
 build/
 *.egg-info/
